@@ -1,0 +1,32 @@
+# Xcode
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+*.xcuserstate
+DerivedData/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+*.xcframework
+
+# macOS
+.DS_Store
+*.dSYM
+
+# IDE
+.idea/
+*.swp
+*~
+
+# Build artifacts
+build/
+*.app
+*.dmg
+
+# Logs (keep log directory but not logs)
+~/Library/Logs/Hisohiso/*.log
+
+# Models (downloaded separately)
+Models/

@@ -1,0 +1,19 @@
+disabled_rules:
+  - trailing_whitespace
+  - line_length
+
+opt_in_rules:
+  - empty_count
+  - explicit_init
+  - closure_spacing
+  - overridden_super_call
+  - redundant_nil_coalescing
+  - private_outlet
+  - attributes
+  - closure_end_indentation
+  - first_where
+  - fatal_error_message
+
+excluded:
+  - .build
+  - Package.swift

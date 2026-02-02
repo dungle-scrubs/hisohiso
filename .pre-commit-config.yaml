@@ -1,0 +1,21 @@
+repos:
+  - repo: local
+    hooks:
+      - id: swiftformat
+        name: SwiftFormat
+        entry: swiftformat --config .swiftformat
+        language: system
+        files: \.swift$
+
+      - id: swiftlint
+        name: SwiftLint
+        entry: swiftlint --strict --config .swiftlint.yml
+        language: system
+        files: \.swift$
+
+      - id: swift-build
+        name: Type Check (swift build)
+        entry: swift build
+        language: system
+        pass_filenames: false
+        always_run: true
