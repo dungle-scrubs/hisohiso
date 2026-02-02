@@ -7,6 +7,8 @@ final class DictationController: ObservableObject {
     private let audioRecorder = AudioRecorder()
     private let transcriber = Transcriber()
     private let textInserter = TextInserter()
+    private let textFormatter = TextFormatter()
+    private let audioFeedback = AudioFeedback()
     private let modelManager: ModelManager
 
     @Published private(set) var stateManager = RecordingStateManager()
@@ -83,6 +85,7 @@ final class DictationController: ObservableObject {
         }
 
         do {
+            audioFeedback.playStart()
             try audioRecorder.startRecording()
             stateManager.setRecording()
         } catch {
@@ -97,6 +100,7 @@ final class DictationController: ObservableObject {
             return
         }
 
+        audioFeedback.playStop()
         let audioSamples = audioRecorder.stopRecording()
 
         guard !audioSamples.isEmpty else {
@@ -116,15 +120,18 @@ final class DictationController: ObservableObject {
         stateManager.setTranscribing()
 
         do {
-            let text = try await transcriber.transcribe(audioSamples)
+            let rawText = try await transcriber.transcribe(audioSamples)
 
-            guard !text.isEmpty else {
+            guard !rawText.isEmpty else {
                 logInfo("Empty transcription result")
                 stateManager.setIdle()
                 return
             }
 
-            try textInserter.insert(text)
+            let formattedText = textFormatter.format(rawText)
+            logInfo("Formatted: '\(rawText)' → '\(formattedText)'")
+            
+            try textInserter.insert(formattedText)
             stateManager.setIdle()
         } catch let error as TranscriberError {
             logError("Transcription error: \(error)")

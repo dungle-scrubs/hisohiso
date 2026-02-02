@@ -22,7 +22,8 @@ enum TranscriptionModel: String, CaseIterable, Identifiable {
     }
 
     /// Default model for best balance of speed and accuracy
-    static let defaultModel: TranscriptionModel = .small
+    /// Using tiny for faster transcription during development
+    static let defaultModel: TranscriptionModel = .tiny
 }
 
 /// Error types for transcription
@@ -49,7 +50,7 @@ enum TranscriberError: Error, LocalizedError {
 /// WhisperKit-based transcription service
 actor Transcriber {
     private var whisperKit: WhisperKit?
-    private let timeoutSeconds: TimeInterval = 10
+    private let timeoutSeconds: TimeInterval = 30
 
     /// Initialize the transcriber with a specific model
     /// - Parameter model: The model to use for transcription
