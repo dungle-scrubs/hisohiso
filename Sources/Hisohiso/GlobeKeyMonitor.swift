@@ -13,11 +13,19 @@ final class GlobeKeyMonitor {
     private var nsEventMonitor: Any?
     private var isGlobePressed = false
 
-    /// Called when Globe key is pressed down
-    var onGlobeDown: (@MainActor () -> Void)?
-
-    /// Called when Globe key is released
-    var onGlobeUp: (@MainActor () -> Void)?
+    /// Called when Globe key is tapped (quick press and release)
+    var onGlobeTap: (@MainActor () -> Void)?
+    
+    /// Called when Globe key is held down (long press)
+    var onGlobeHoldStart: (@MainActor () -> Void)?
+    
+    /// Called when Globe key is released after being held
+    var onGlobeHoldEnd: (@MainActor () -> Void)?
+    
+    /// Threshold to distinguish tap from hold (in seconds)
+    private let holdThreshold: TimeInterval = 0.3
+    private var pressTime: Date?
+    private var isHolding = false
 
     deinit {
         // Cleanup event tap directly in deinit since stop() is MainActor-isolated
@@ -116,12 +124,32 @@ final class GlobeKeyMonitor {
     private func handleGlobeState(pressed: Bool, source: String) {
         if pressed && !isGlobePressed {
             isGlobePressed = true
-            logInfo("Globe key pressed (via \(source))")
-            onGlobeDown?()
+            pressTime = Date()
+            isHolding = false
+            logDebug("Globe key down (via \(source))")
+            
+            // Schedule hold detection
+            DispatchQueue.main.asyncAfter(deadline: .now() + holdThreshold) { [weak self] in
+                guard let self, self.isGlobePressed, !self.isHolding else { return }
+                self.isHolding = true
+                logInfo("Globe key hold started")
+                self.onGlobeHoldStart?()
+            }
         } else if !pressed && isGlobePressed {
             isGlobePressed = false
-            logInfo("Globe key released (via \(source))")
-            onGlobeUp?()
+            let pressDuration = pressTime.map { Date().timeIntervalSince($0) } ?? 0
+            
+            if isHolding {
+                // Was holding - trigger hold end
+                logInfo("Globe key hold ended (held \(String(format: "%.2f", pressDuration))s)")
+                isHolding = false
+                onGlobeHoldEnd?()
+            } else {
+                // Quick tap
+                logInfo("Globe key tapped (via \(source))")
+                onGlobeTap?()
+            }
+            pressTime = nil
         }
     }
 

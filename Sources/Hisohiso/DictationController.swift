@@ -60,12 +60,20 @@ final class DictationController: ObservableObject {
     }
 
     private func setupCallbacks() {
-        globeMonitor.onGlobeDown = { [weak self] in
+        // Tap: toggle recording on/off
+        globeMonitor.onGlobeTap = { [weak self] in
+            guard let self else { return }
+            Task { await self.toggleRecording() }
+        }
+        
+        // Hold: start recording
+        globeMonitor.onGlobeHoldStart = { [weak self] in
             guard let self else { return }
             Task { await self.startRecording() }
         }
-
-        globeMonitor.onGlobeUp = { [weak self] in
+        
+        // Release after hold: stop recording
+        globeMonitor.onGlobeHoldEnd = { [weak self] in
             guard let self else { return }
             Task { await self.stopRecordingAndTranscribe() }
         }
@@ -78,6 +86,15 @@ final class DictationController: ObservableObject {
         }
     }
 
+    private func toggleRecording() async {
+        if stateManager.isIdle {
+            await startRecording()
+        } else if stateManager.isRecording {
+            await stopRecordingAndTranscribe()
+        }
+        // Ignore if transcribing or in error state
+    }
+    
     private func startRecording() async {
         guard stateManager.isIdle else {
             logDebug("Cannot start recording: not in idle state")
