@@ -1,3 +1,4 @@
+import Cocoa
 import Foundation
 
 /// Coordinates the dictation flow: Globe key → recording → transcription → text insertion
@@ -28,6 +29,12 @@ final class DictationController: ObservableObject {
 
     /// Timer for sending audio levels to RustyBar
     private var audioLevelTimer: Timer?
+
+    /// Callback for audio level updates (for UI waveform)
+    var onAudioLevels: (([UInt8]) -> Void)?
+
+    /// Monitor for escape key to cancel recording
+    private var escapeMonitor: Any?
 
     private var isInitialized = false
 
@@ -73,6 +80,7 @@ final class DictationController: ObservableObject {
     func shutdown() {
         globeMonitor.stop()
         hotkeyManager?.stop()
+        stopEscapeMonitor()
         if stateManager.isRecording {
             if useAudioKit {
                 audioKitRecorder.cancelRecording()
@@ -164,10 +172,52 @@ final class DictationController: ObservableObject {
 
             // Start audio level updates for RustyBar waveform
             startAudioLevelUpdates()
+
+            // Start escape key monitor to cancel recording
+            startEscapeMonitor()
         } catch {
             logError("Failed to start recording: \(error)")
             stateManager.setError("Failed to start recording")
             rustyBarBridge.sendState(.error(message: "Failed to start"))
+        }
+    }
+
+    /// Cancel recording without transcribing
+    private func cancelRecording() {
+        guard stateManager.isRecording else { return }
+
+        logInfo("Recording cancelled by user")
+        stopEscapeMonitor()
+        stopAudioLevelUpdates()
+
+        if useAudioKit {
+            audioKitRecorder.cancelRecording()
+        } else {
+            audioRecorder.cancelRecording()
+        }
+
+        stateManager.setIdle()
+        rustyBarBridge.sendState(.idle)
+    }
+
+    private func startEscapeMonitor() {
+        // Use global monitor since we're a menu bar app without a key window
+        escapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == 53 { // Escape key
+                logInfo("Escape pressed - cancelling recording")
+                Task { @MainActor [weak self] in
+                    self?.cancelRecording()
+                }
+            }
+        }
+        logDebug("Escape monitor started")
+    }
+
+    private func stopEscapeMonitor() {
+        if let monitor = escapeMonitor {
+            NSEvent.removeMonitor(monitor)
+            escapeMonitor = nil
+            logDebug("Escape monitor stopped")
         }
     }
 
@@ -184,9 +234,10 @@ final class DictationController: ObservableObject {
                 samples = self.audioRecorder.getRecentSamples(count: 1600)
             }
 
-            // Calculate levels and send to RustyBar
+            // Calculate levels and send to RustyBar and UI
             let levels = RustyBarBridge.calculateAudioLevels(from: samples)
             self.rustyBarBridge.sendAudioLevels(levels)
+            self.onAudioLevels?(levels)
         }
     }
 
@@ -203,7 +254,8 @@ final class DictationController: ObservableObject {
 
         audioFeedback.playStop()
         stopAudioLevelUpdates()
-        
+        stopEscapeMonitor()
+
         let audioSamples: [Float]
         if useAudioKit {
             audioSamples = audioKitRecorder.stopRecording()
