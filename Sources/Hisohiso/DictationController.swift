@@ -4,19 +4,30 @@ import Foundation
 @MainActor
 final class DictationController: ObservableObject {
     private let globeMonitor = GlobeKeyMonitor()
-    private let audioRecorder = AudioRecorder()
+    let audioRecorder = AudioRecorder()
+    private let audioKitRecorder = AudioKitRecorder()
     private let transcriber = Transcriber()
+
+    /// Whether to use AudioKit for recording (with noise handling)
+    var useAudioKit: Bool {
+        get { UserDefaults.standard.bool(forKey: "useAudioKit") }
+        set { UserDefaults.standard.set(newValue, forKey: "useAudioKit") }
+    }
     private let textInserter = TextInserter()
     private let textFormatter = TextFormatter()
     private let audioFeedback = AudioFeedback()
     private let modelManager: ModelManager
     private let hotkeyManager: HotkeyManager?
     private let historyStore = HistoryStore.shared
+    private let rustyBarBridge = RustyBarBridge.shared
 
     @Published private(set) var stateManager = RecordingStateManager()
 
     /// Track recording start time for duration calculation
     private var recordingStartTime: Date?
+
+    /// Timer for sending audio levels to RustyBar
+    private var audioLevelTimer: Timer?
 
     private var isInitialized = false
 
@@ -63,7 +74,11 @@ final class DictationController: ObservableObject {
         globeMonitor.stop()
         hotkeyManager?.stop()
         if stateManager.isRecording {
-            audioRecorder.cancelRecording()
+            if useAudioKit {
+                audioKitRecorder.cancelRecording()
+            } else {
+                audioRecorder.cancelRecording()
+            }
         }
         stateManager.setIdle()
         logInfo("DictationController shutdown")
@@ -76,15 +91,23 @@ final class DictationController: ObservableObject {
             Task { await self.toggleRecording() }
         }
 
-        // Hold: start recording
+        // Hold: start recording, or stop if already recording from tap
         globeMonitor.onGlobeHoldStart = { [weak self] in
             guard let self else { return }
+            // If already recording (from a tap), stop immediately
+            if self.stateManager.isRecording {
+                logInfo("Hold started while recording - stopping immediately")
+                Task { await self.stopRecordingAndTranscribe() }
+                return
+            }
             Task { await self.startRecording() }
         }
 
-        // Release after hold: stop recording
+        // Release after hold: stop recording (only if still recording)
         globeMonitor.onGlobeHoldEnd = { [weak self] in
             guard let self else { return }
+            // Only stop if still recording (might have been stopped by hold-start)
+            guard self.stateManager.isRecording else { return }
             Task { await self.stopRecordingAndTranscribe() }
         }
 
@@ -122,15 +145,54 @@ final class DictationController: ObservableObject {
             return
         }
 
+        // Set state FIRST so release callback knows we're recording
+        stateManager.setRecording()
+        audioFeedback.playStart()
+        recordingStartTime = Date()
+
         do {
-            audioFeedback.playStart()
-            recordingStartTime = Date()
-            try audioRecorder.startRecording()
-            stateManager.setRecording()
+            if useAudioKit {
+                try audioKitRecorder.startRecording()
+                logInfo("Using AudioKit recorder")
+            } else {
+                try audioRecorder.startRecording()
+                logInfo("Using AVAudioEngine recorder")
+            }
+
+            // Notify RustyBar
+            rustyBarBridge.sendState(.recording)
+
+            // Start audio level updates for RustyBar waveform
+            startAudioLevelUpdates()
         } catch {
             logError("Failed to start recording: \(error)")
             stateManager.setError("Failed to start recording")
+            rustyBarBridge.sendState(.error(message: "Failed to start"))
         }
+    }
+
+    private func startAudioLevelUpdates() {
+        audioLevelTimer?.invalidate()
+        audioLevelTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            guard let self else { return }
+
+            // Get recent audio samples from recorder
+            let samples: [Float]
+            if self.useAudioKit {
+                samples = self.audioKitRecorder.getRecentSamples(count: 1600)
+            } else {
+                samples = self.audioRecorder.getRecentSamples(count: 1600)
+            }
+
+            // Calculate levels and send to RustyBar
+            let levels = RustyBarBridge.calculateAudioLevels(from: samples)
+            self.rustyBarBridge.sendAudioLevels(levels)
+        }
+    }
+
+    private func stopAudioLevelUpdates() {
+        audioLevelTimer?.invalidate()
+        audioLevelTimer = nil
     }
 
     private func stopRecordingAndTranscribe() async {
@@ -140,7 +202,17 @@ final class DictationController: ObservableObject {
         }
 
         audioFeedback.playStop()
-        let audioSamples = audioRecorder.stopRecording()
+        stopAudioLevelUpdates()
+        
+        let audioSamples: [Float]
+        if useAudioKit {
+            audioSamples = audioKitRecorder.stopRecording()
+        } else {
+            audioSamples = audioRecorder.stopRecording()
+        }
+
+        // Notify RustyBar of transcribing state
+        rustyBarBridge.sendState(.transcribing)
 
         // Calculate recording duration
         let duration: TimeInterval
@@ -154,18 +226,45 @@ final class DictationController: ObservableObject {
         guard !audioSamples.isEmpty else {
             logWarning("No audio captured")
             stateManager.setIdle()
+            rustyBarBridge.sendState(.idle)
             return
         }
 
-        // Minimum audio length check (~0.5 seconds)
-        let minSamples = 8000 // 0.5s at 16kHz
+        // Minimum audio length check - Parakeet needs at least 1 second (16000 samples)
+        let minSamples = 16000 // 1s at 16kHz
         guard audioSamples.count >= minSamples else {
-            logInfo("Audio too short (\(audioSamples.count) samples), ignoring")
+            logInfo("Audio too short (\(audioSamples.count) samples, need \(minSamples)), ignoring")
+            // Just go back to idle silently - no error, just not enough audio
             stateManager.setIdle()
+            rustyBarBridge.sendState(.idle)
             return
         }
 
         stateManager.setTranscribing()
+
+        // Debug: Save audio to file for analysis
+        #if DEBUG
+        saveDebugAudio(audioSamples)
+        #endif
+
+        // Voice verification (if enabled)
+        if VoiceVerifier.shared.isEnabled, VoiceVerifier.shared.isEnrolled {
+            do {
+                let verificationResult = try VoiceVerifier.shared.verify(audioSamples: audioSamples)
+                if !verificationResult.isMatch {
+                    logInfo("Voice verification failed (similarity: \(String(format: "%.2f", verificationResult.similarity)))")
+                    stateManager.setIdle()
+                    rustyBarBridge.sendState(.idle)
+                    // Optionally show brief feedback
+                    // Could show "Voice not recognized" but keeping it silent for now
+                    return
+                }
+                logDebug("Voice verified (similarity: \(String(format: "%.2f", verificationResult.similarity)))")
+            } catch {
+                // If verification fails, log but continue with transcription
+                logWarning("Voice verification error: \(error.localizedDescription)")
+            }
+        }
 
         do {
             let rawText = try await transcriber.transcribe(audioSamples)
@@ -173,6 +272,7 @@ final class DictationController: ObservableObject {
             guard !rawText.isEmpty else {
                 logInfo("Empty transcription result")
                 stateManager.setIdle()
+                rustyBarBridge.sendState(.idle)
                 return
             }
 
@@ -185,19 +285,48 @@ final class DictationController: ObservableObject {
 
             try textInserter.insert(formattedText)
             stateManager.setIdle()
+            rustyBarBridge.sendState(.idle)
         } catch let error as TranscriberError {
             logError("Transcription error: \(error)")
             switch error {
             case .timeout:
+                rustyBarBridge.sendState(.error(message: "Timed out"))
                 stateManager.setError("Transcription timed out")
+            case .invalidAudioData:
+                // Audio too short or invalid - just go back to idle silently
+                logInfo("Audio too short for transcription")
+                stateManager.setIdle()
+                rustyBarBridge.sendState(.idle)
             default:
+                rustyBarBridge.sendState(.error(message: error.localizedDescription))
                 stateManager.setError(error.localizedDescription)
             }
         } catch {
             logError("Error during transcription: \(error)")
+            rustyBarBridge.sendState(.error(message: error.localizedDescription))
             stateManager.setError(error.localizedDescription)
         }
     }
+
+    #if DEBUG
+    /// Save audio samples to file for debugging
+    private func saveDebugAudio(_ samples: [Float]) {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+        let path = "/tmp/hisohiso-debug-\(timestamp).raw"
+        
+        let data = samples.withUnsafeBufferPointer { buffer in
+            Data(buffer: buffer)
+        }
+        
+        do {
+            try data.write(to: URL(fileURLWithPath: path))
+            logInfo("Debug audio saved to \(path) (\(samples.count) samples)")
+        } catch {
+            logError("Failed to save debug audio: \(error)")
+        }
+    }
+    #endif
 }
 
 // MARK: - Errors
