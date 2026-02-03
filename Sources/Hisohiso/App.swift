@@ -26,7 +26,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var stateObserver: AnyCancellable?
     private var onboardingWindow: OnboardingWindow?
     private var preferencesWindow: PreferencesWindow?
-    
+    private var historyPalette: HistoryPaletteWindow?
+    private var historyHotkeyMonitor: HistoryHotkeyMonitor?
+
     /// UserDefaults key for tracking first launch
     private let hasCompletedOnboardingKey = "hasCompletedOnboarding"
 
@@ -37,7 +39,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         modelManager = ModelManager()
         setupStatusItem()
         setupFloatingPill()
-        
+        setupHistoryPalette()
+        setupHistoryHotkey()
+
         // Check if first launch
         if !UserDefaults.standard.bool(forKey: hasCompletedOnboardingKey) {
             showOnboarding()
@@ -48,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         dictationController?.shutdown()
+        historyHotkeyMonitor?.stop()
         logInfo("Hisohiso shutting down")
     }
 
@@ -76,6 +81,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupFloatingPill() {
         floatingPill = FloatingPillWindow()
         logInfo("Floating pill created")
+    }
+
+    private func setupHistoryPalette() {
+        historyPalette = HistoryPaletteWindow()
+        historyPalette?.onSelect = { [weak self] record in
+            self?.handleHistorySelection(record)
+        }
+        logInfo("History palette created")
+    }
+
+    private func setupHistoryHotkey() {
+        historyHotkeyMonitor = HistoryHotkeyMonitor()
+        historyHotkeyMonitor?.onHotkey = { [weak self] in
+            self?.toggleHistoryPalette()
+        }
+        historyHotkeyMonitor?.start()
+        logInfo("History hotkey monitor started (⌃⌥Space)")
+    }
+
+    private func toggleHistoryPalette() {
+        guard let palette = historyPalette else { return }
+
+        if palette.isVisible {
+            palette.dismiss()
+        } else {
+            palette.showPalette()
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    private func handleHistorySelection(_ record: TranscriptionRecord) {
+        logInfo("History item selected: \(record.text.prefix(50))...")
+
+        // Copy to clipboard
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(record.text, forType: .string)
+
+        // Also insert at cursor if possible
+        let textInserter = TextInserter()
+        do {
+            try textInserter.insert(record.text)
+            logInfo("Inserted history text at cursor")
+        } catch {
+            logWarning("Could not insert at cursor, copied to clipboard: \(error)")
+            // Show notification that text was copied
+            showCopiedNotification()
+        }
+    }
+
+    private func showCopiedNotification() {
+        // Brief visual feedback that text was copied
+        let alert = NSAlert()
+        alert.messageText = "Copied to Clipboard"
+        alert.informativeText = "The text has been copied. Press ⌘V to paste."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+
+        // Auto-dismiss after 1.5 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            NSApp.stopModal()
+        }
+
+        alert.runModal()
     }
 
     private func setupDictationController() {
@@ -180,10 +249,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         
         if let window = preferencesWindow {
-            window.level = .floating
+            window.level = .normal
             window.makeKeyAndOrderFront(nil)
             window.orderFrontRegardless()
+            window.makeMain()
         }
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
     }
 

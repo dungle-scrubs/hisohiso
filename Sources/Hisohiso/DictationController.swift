@@ -10,8 +10,12 @@ final class DictationController: ObservableObject {
     private let textFormatter = TextFormatter()
     private let audioFeedback = AudioFeedback()
     private let modelManager: ModelManager
+    private let historyStore = HistoryStore.shared
 
     @Published private(set) var stateManager = RecordingStateManager()
+
+    /// Track recording start time for duration calculation
+    private var recordingStartTime: Date?
 
     private var isInitialized = false
 
@@ -103,6 +107,7 @@ final class DictationController: ObservableObject {
 
         do {
             audioFeedback.playStart()
+            recordingStartTime = Date()
             try audioRecorder.startRecording()
             stateManager.setRecording()
         } catch {
@@ -119,6 +124,15 @@ final class DictationController: ObservableObject {
 
         audioFeedback.playStop()
         let audioSamples = audioRecorder.stopRecording()
+
+        // Calculate recording duration
+        let duration: TimeInterval
+        if let startTime = recordingStartTime {
+            duration = Date().timeIntervalSince(startTime)
+        } else {
+            duration = Double(audioSamples.count) / 16000.0 // Estimate from samples
+        }
+        recordingStartTime = nil
 
         guard !audioSamples.isEmpty else {
             logWarning("No audio captured")
@@ -147,7 +161,11 @@ final class DictationController: ObservableObject {
 
             let formattedText = textFormatter.format(rawText)
             logInfo("Formatted: '\(rawText)' → '\(formattedText)'")
-            
+
+            // Save to history
+            let modelName = modelManager.selectedModel.displayName
+            historyStore.save(text: formattedText, duration: duration, modelName: modelName)
+
             try textInserter.insert(formattedText)
             stateManager.setIdle()
         } catch let error as TranscriberError {
