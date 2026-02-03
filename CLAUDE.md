@@ -113,3 +113,52 @@ swift test
 ```
 
 Tests cover: TextFormatter, HistoryStore, RustyBarBridge, HotkeyManager
+
+## Lessons Learned
+
+### Permissions & Code Signing
+
+| Problem | Time Wasted | Solution |
+|---------|-------------|----------|
+| Accessibility/Input Monitoring permissions lost after rebuild | 30+ min | Sign with stable identifier: `codesign --force --sign - --identifier "com.hisohiso.app"`. Permissions are tied to code signature. |
+| TCC permissions not in database despite UI showing enabled | 20 min | Toggle permission OFF then ON in System Settings. macOS UI sometimes lies. |
+| CGEventTap `.listenOnly` requires Input Monitoring, not just Accessibility | 15 min | Use `.defaultTap` which only needs Accessibility permission. |
+
+### Globe Key Detection
+
+| Problem | Time Wasted | Solution |
+|---------|-------------|----------|
+| Globe key intermittently not detected | 20 min | Use dual detection: CGEventTap + NSEvent.addGlobalMonitorForEvents as fallback. Both check for same key. |
+| "Press 🌐 key to" system setting intercepting Globe | 10 min | Must set to "Do Nothing" in System Settings → Keyboard. |
+| CGEventFlags for Globe key | 5 min | `.maskSecondaryFn` (0x800000) for CGEvent, `.function` for NSEvent. |
+
+### UI / Windows
+
+| Problem | Time Wasted | Solution |
+|---------|-------------|----------|
+| SwiftUI NSHostingView not rendering in NSWindow | 30+ min | Use pure AppKit (NSView, NSTextField, etc.) instead. SwiftUI in menu bar apps has issues. |
+| Floating window not appearing | 20 min | Use `.screenSaver` window level, call `makeKeyAndOrderFront(nil)`. |
+| NSWindow created but invisible | 15 min | Ensure `contentView` is set, frame is valid, and window is ordered front on main thread. |
+
+### WhisperKit / Transcription
+
+| Problem | Time Wasted | Solution |
+|---------|-------------|----------|
+| Transcription timeout with small-en model | 15 min | Use tiny model for dev/testing. small-en can take 15+ seconds. |
+| WhisperKit hanging on subsequent transcriptions | 10 min | Model initialization is slow; keep instance alive. Don't reinitialize per-transcription. |
+
+### Swift Concurrency
+
+| Problem | Time Wasted | Solution |
+|---------|-------------|----------|
+| Combine `.sink` not triggering on @Published changes | 10 min | Ensure subscription is stored (AnyCancellable), receive on main thread. |
+| Task inside callback not executing | 10 min | Mark callback type as `@MainActor` if calling MainActor-isolated methods. |
+
+### General
+
+| What Works | Notes |
+|------------|-------|
+| AppKit over SwiftUI for menu bar apps | More reliable window management, no mysterious rendering issues |
+| File logging to ~/Library/Logs/ | Essential for debugging - can tail in terminal while testing |
+| Dual input modes (tap + hold) | Use timer threshold (0.3s) to distinguish tap from hold |
+| NSSound for audio feedback | Simple, works: `NSSound(contentsOfFile: "/System/Library/Sounds/Tink.aiff")` |
