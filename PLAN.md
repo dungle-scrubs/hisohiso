@@ -1472,7 +1472,9 @@ hisohiso/
 - [ ] Hisohiso --history-json CLI for RustyBar
 - [ ] Option to hide floating pill when RustyBar active
 
-### v0.5 - Cloud & Models
+### v0.5 - Audio Processing & Cloud
+- [ ] AudioKit integration for noise suppression
+- [ ] Toggle for noise suppression in preferences
 - [ ] Cloud providers (OpenAI, Groq) as optional fallback
 - [ ] Multiple model support in preferences
 - [ ] LLM-based formatting option (local llama.cpp or cloud)
