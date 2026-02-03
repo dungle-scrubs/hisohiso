@@ -7,13 +7,16 @@ import Carbon.HIToolbox
 final class HistoryPaletteWindow: NSPanel {
     private let searchField = NSTextField()
     private let scrollView = NSScrollView()
-    private let tableView = NSTableView()
+    private let tableView = PointerTableView()
     private let emptyLabel = NSTextField(labelWithString: "")
 
     private var records: [TranscriptionRecord] = []
     private var filteredRecords: [TranscriptionRecord] = []
     private var selectedIndex: Int = 0
     private var localKeyMonitor: Any?
+    private var localClickMonitor: Any?
+    private var globalClickMonitor: Any?
+    private var mouseMovedMonitor: Any?
 
     /// Callback when user selects a record
     var onSelect: ((TranscriptionRecord) -> Void)?
@@ -51,6 +54,15 @@ final class HistoryPaletteWindow: NSPanel {
         if let monitor = localKeyMonitor {
             NSEvent.removeMonitor(monitor)
         }
+        if let monitor = localClickMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        if let monitor = globalClickMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        if let monitor = mouseMovedMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
     }
 
     private func setupWindow() {
@@ -61,6 +73,7 @@ final class HistoryPaletteWindow: NSPanel {
         isMovableByWindowBackground = false
         hidesOnDeactivate = false
         hasShadow = true
+        acceptsMouseMovedEvents = true
 
         // Critical for NSPanel to accept key input
         becomesKeyOnlyIfNeeded = false
@@ -115,11 +128,12 @@ final class HistoryPaletteWindow: NSPanel {
         tableView.style = .plain
         tableView.backgroundColor = .clear
         tableView.headerView = nil
-        tableView.intercellSpacing = NSSize(width: 0, height: 1)
+        tableView.intercellSpacing = NSSize(width: 0, height: 0)
         tableView.rowHeight = 56
         tableView.selectionHighlightStyle = .regular
         tableView.dataSource = self
         tableView.delegate = self
+        tableView.action = #selector(tableViewClicked)
         tableView.doubleAction = #selector(tableViewDoubleClicked)
         tableView.target = self
         tableView.gridColor = .clear
@@ -129,7 +143,10 @@ final class HistoryPaletteWindow: NSPanel {
         column.width = 568
         tableView.addTableColumn(column)
 
-        // Scroll view
+        // Scroll view - use custom clip view to prevent cursor interference
+        let clipView = NoIBeamClipView()
+        clipView.drawsBackground = false
+        scrollView.contentView = clipView
         scrollView.frame = NSRect(x: 0, y: 8, width: 600, height: 338)
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
@@ -138,7 +155,6 @@ final class HistoryPaletteWindow: NSPanel {
         scrollView.borderType = .noBorder
         scrollView.backgroundColor = .clear
         scrollView.drawsBackground = false
-        scrollView.contentView.drawsBackground = false
         backgroundView.addSubview(scrollView)
 
         // Empty state label
@@ -169,6 +185,83 @@ final class HistoryPaletteWindow: NSPanel {
             NSEvent.removeMonitor(monitor)
             localKeyMonitor = nil
         }
+    }
+
+    private func setupClickOutsideMonitor() {
+        // Local monitor: catches clicks within the app - check if outside our window
+        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            guard let self, self.isVisible else { return event }
+            
+            // Convert click location to screen coordinates
+            let clickLocation = event.locationInWindow
+            if let eventWindow = event.window {
+                let screenLocation = eventWindow.convertPoint(toScreen: clickLocation)
+                // Check if click is outside our panel
+                if !self.frame.contains(screenLocation) {
+                    self.dismiss()
+                    return nil // Consume the event
+                }
+            } else {
+                // Click with no window (shouldn't happen but handle it)
+                self.dismiss()
+                return nil
+            }
+            return event
+        }
+        
+        // Global monitor: catches clicks outside the app entirely
+        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            guard let self, self.isVisible else { return }
+            self.dismiss()
+        }
+    }
+
+    private func removeClickOutsideMonitor() {
+        if let monitor = localClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            localClickMonitor = nil
+        }
+        if let monitor = globalClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            globalClickMonitor = nil
+        }
+    }
+
+    private func setupCursorMonitor() {
+        // Push our cursor onto the stack to maintain it
+        NSCursor.pointingHand.push()
+        
+        // Monitor mouse moved to set cursor based on position
+        mouseMovedMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .mouseEntered, .mouseExited, .scrollWheel]) { [weak self] event in
+            guard let self, self.isVisible else { return event }
+            
+            // Get mouse location in window coordinates
+            let locationInWindow = event.locationInWindow
+            
+            // Check if over the scroll view (table area) but not over the scroller
+            let scrollViewFrame = self.scrollView.frame
+            let scrollerWidth: CGFloat = 15
+            let tableAreaFrame = NSRect(
+                x: scrollViewFrame.origin.x,
+                y: scrollViewFrame.origin.y,
+                width: scrollViewFrame.width - scrollerWidth,
+                height: scrollViewFrame.height
+            )
+            
+            if tableAreaFrame.contains(locationInWindow) {
+                NSCursor.pointingHand.set()
+            }
+            
+            return event
+        }
+    }
+
+    private func removeCursorMonitor() {
+        if let monitor = mouseMovedMonitor {
+            NSEvent.removeMonitor(monitor)
+            mouseMovedMonitor = nil
+        }
+        NSCursor.pop()
     }
 
     private func handleKeyDown(_ event: NSEvent) -> Bool {
@@ -218,7 +311,9 @@ final class HistoryPaletteWindow: NSPanel {
         }
 
         setupKeyMonitor()
-        
+        setupClickOutsideMonitor()
+        setupCursorMonitor()
+
         // Activate app and show window
         NSApp.activate(ignoringOtherApps: true)
         makeKeyAndOrderFront(nil)
@@ -235,6 +330,8 @@ final class HistoryPaletteWindow: NSPanel {
     /// Dismiss the palette
     func dismiss() {
         removeKeyMonitor()
+        removeClickOutsideMonitor()
+        removeCursorMonitor()
         orderOut(nil)
         onDismiss?()
         logInfo("History palette dismissed")
@@ -286,6 +383,13 @@ final class HistoryPaletteWindow: NSPanel {
     }
 
     @objc private func searchFieldAction() {
+        selectCurrentItem()
+    }
+
+    @objc private func tableViewClicked() {
+        let row = tableView.clickedRow
+        guard row >= 0, row < filteredRecords.count else { return }
+        selectedIndex = row
         selectCurrentItem()
     }
 
@@ -349,6 +453,44 @@ extension HistoryPaletteWindow: NSTableViewDelegate {
 // MARK: - HistoryRowView
 
 private final class HistoryRowView: NSTableRowView {
+    private var trackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = trackingArea {
+            removeTrackingArea(existing)
+        }
+        trackingArea = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea!)
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        NSCursor.pointingHand.push()
+        // Select this row on hover
+        if let tableView = superview as? NSTableView {
+            let row = tableView.row(for: self)
+            if row >= 0 {
+                tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            }
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        NSCursor.pop()
+    }
+
+    override func resetCursorRects() {
+        discardCursorRects()
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
     override func drawSelection(in dirtyRect: NSRect) {
         if selectionHighlightStyle != .none {
             let selectionRect = bounds.insetBy(dx: 8, dy: 1)
@@ -364,11 +506,70 @@ private final class HistoryRowView: NSTableRowView {
     }
 }
 
+// MARK: - NoIBeamClipView
+
+private final class NoIBeamClipView: NSClipView {
+    override func resetCursorRects() {
+        // Don't set any cursor rects
+    }
+}
+
+// MARK: - PointerTableView
+
+private final class PointerTableView: NSTableView {
+    private var trackingArea: NSTrackingArea?
+    
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = trackingArea {
+            removeTrackingArea(existing)
+        }
+        trackingArea = NSTrackingArea(
+            rect: bounds,
+            options: [.cursorUpdate, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea!)
+    }
+    
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.pointingHand.set()
+    }
+    
+    override func resetCursorRects() {
+        // Don't call super - we handle cursor via tracking area
+    }
+}
+
+// MARK: - NonSelectableTextField
+
+private final class NonSelectableTextField: NSTextField {
+    override func resetCursorRects() {
+        // Don't add any cursor rects - let parent handle it
+    }
+    
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // Pass through all mouse events to parent
+        return nil
+    }
+}
+
 // MARK: - HistoryRecordCellView
 
 private final class HistoryRecordCellView: NSTableCellView {
-    private let textLabel = NSTextField(labelWithString: "")
-    private let timestampLabel = NSTextField(labelWithString: "")
+    private let textLabel = NonSelectableTextField(labelWithString: "")
+    private let timestampLabel = NonSelectableTextField(labelWithString: "")
+
+    override func resetCursorRects() {
+        discardCursorRects()
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+    
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // Pass through to row view for cursor handling
+        return nil
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -388,11 +589,13 @@ private final class HistoryRecordCellView: NSTableCellView {
         textLabel.cell?.truncatesLastVisibleLine = true
         textLabel.drawsBackground = false
         textLabel.isBezeled = false
+        textLabel.isSelectable = false
 
         timestampLabel.font = .systemFont(ofSize: 11, weight: .regular)
         timestampLabel.textColor = NSColor(white: 0.5, alpha: 1.0)
         timestampLabel.drawsBackground = false
         timestampLabel.isBezeled = false
+        timestampLabel.isSelectable = false
 
         addSubview(textLabel)
         addSubview(timestampLabel)
