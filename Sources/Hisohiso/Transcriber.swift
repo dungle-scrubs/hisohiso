@@ -105,14 +105,52 @@ enum TranscriberError: Error, LocalizedError {
     }
 }
 
+// MARK: - Cloud Fallback Settings
+
+/// Cloud fallback configuration
+struct CloudFallbackSettings {
+    /// Whether to use cloud as fallback when local fails
+    var enabled: Bool = false
+
+    /// Preferred cloud provider
+    var preferredProvider: CloudProviderType = .openAI
+
+    /// Load from UserDefaults
+    static func load() -> CloudFallbackSettings {
+        let defaults = UserDefaults.standard
+        return CloudFallbackSettings(
+            enabled: defaults.bool(forKey: "cloudFallbackEnabled"),
+            preferredProvider: CloudProviderType(
+                rawValue: defaults.string(forKey: "cloudFallbackProvider") ?? "openai"
+            ) ?? .openAI
+        )
+    }
+
+    /// Save to UserDefaults
+    func save() {
+        let defaults = UserDefaults.standard
+        defaults.set(enabled, forKey: "cloudFallbackEnabled")
+        defaults.set(preferredProvider.rawValue, forKey: "cloudFallbackProvider")
+    }
+}
+
 // MARK: - Transcriber
 
-/// Multi-backend transcription service supporting WhisperKit and FluidAudio (Parakeet)
+/// Multi-backend transcription service supporting WhisperKit, FluidAudio (Parakeet), and cloud fallback
 actor Transcriber {
     private var whisperKit: WhisperKit?
     private var asrManager: AsrManager?
     private var currentModel: TranscriptionModel?
     private let timeoutSeconds: TimeInterval = 30
+
+    /// Cloud providers for fallback
+    private let cloudProviders: [CloudProviderType: CloudProvider] = [
+        .openAI: OpenAIProvider(),
+        .groq: GroqProvider()
+    ]
+
+    /// Cloud fallback settings
+    var cloudFallbackSettings = CloudFallbackSettings.load()
 
     /// Initialize the transcriber with a specific model
     /// - Parameter model: The model to use for transcription
@@ -189,12 +227,60 @@ actor Transcriber {
 
         logInfo("Starting transcription of \(audioSamples.count) samples using \(model.backend.rawValue)")
 
-        switch model.backend {
-        case .whisper:
-            return try await transcribeWithWhisper(audioSamples)
-        case .parakeet:
-            return try await transcribeWithParakeet(audioSamples)
+        do {
+            // Try local transcription first
+            switch model.backend {
+            case .whisper:
+                return try await transcribeWithWhisper(audioSamples)
+            case .parakeet:
+                return try await transcribeWithParakeet(audioSamples)
+            }
+        } catch {
+            // If local fails and cloud fallback is enabled, try cloud
+            if cloudFallbackSettings.enabled {
+                logWarning("Local transcription failed: \(error.localizedDescription). Trying cloud fallback...")
+                return try await transcribeWithCloud(audioSamples)
+            }
+            throw error
         }
+    }
+
+    /// Transcribe using cloud only (useful when local model unavailable)
+    /// - Parameter audioSamples: Audio samples at 16kHz mono
+    /// - Returns: Transcribed text
+    func transcribeWithCloud(_ audioSamples: [Float]) async throws -> String {
+        // Try preferred provider first
+        let preferredType = cloudFallbackSettings.preferredProvider
+        if let provider = cloudProviders[preferredType], provider.isConfigured {
+            logInfo("Transcribing with cloud provider: \(provider.displayName)")
+            do {
+                return try await provider.transcribe(audioSamples)
+            } catch {
+                logWarning("Preferred cloud provider failed: \(error.localizedDescription)")
+            }
+        }
+
+        // Try other configured providers
+        for (type, provider) in cloudProviders where type != preferredType && provider.isConfigured {
+            logInfo("Trying fallback cloud provider: \(provider.displayName)")
+            do {
+                return try await provider.transcribe(audioSamples)
+            } catch {
+                logWarning("Fallback cloud provider failed: \(error.localizedDescription)")
+            }
+        }
+
+        throw CloudTranscriptionError.notConfigured
+    }
+
+    /// Check if any cloud provider is configured
+    var hasCloudProvider: Bool {
+        cloudProviders.values.contains { $0.isConfigured }
+    }
+
+    /// Get list of configured cloud providers
+    var configuredCloudProviders: [CloudProvider] {
+        cloudProviders.values.filter { $0.isConfigured }
     }
 
     private func transcribeWithWhisper(_ audioSamples: [Float]) async throws -> String {
