@@ -63,7 +63,14 @@ actor Transcriber {
                 verbose: false,
                 logLevel: .none
             )
-            logInfo("Transcriber initialized successfully")
+            logInfo("Transcriber initialized, warming up...")
+            
+            // Warmup with silent audio to prime the Neural Engine
+            if let kit = whisperKit {
+                let silentAudio = [Float](repeating: 0, count: 16000) // 1 second of silence
+                _ = try? await kit.transcribe(audioArray: silentAudio)
+            }
+            logInfo("Transcriber warmed up and ready")
         } catch {
             logError("Failed to initialize transcriber: \(error)")
             throw TranscriberError.modelNotFound(model.rawValue)
