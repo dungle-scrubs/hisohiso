@@ -24,6 +24,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dictationController: DictationController?
     private var modelManager: ModelManager?
     private var stateObserver: AnyCancellable?
+    private var onboardingWindow: OnboardingWindow?
+    
+    /// UserDefaults key for tracking first launch
+    private let hasCompletedOnboardingKey = "hasCompletedOnboarding"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         logInfo("Hisohiso starting...")
@@ -32,6 +36,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         modelManager = ModelManager()
         setupStatusItem()
         setupFloatingPill()
+        
+        // TODO: Fix onboarding window display issue
+        // For now, skip onboarding and go straight to dictation
         setupDictationController()
     }
 
@@ -138,6 +145,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             self?.dictationController?.stateManager.setIdle()
         }
+    }
+    
+    private func showOnboarding() {
+        logInfo("Showing onboarding")
+        onboardingWindow = OnboardingWindow { [weak self] in
+            guard let self else { return }
+            UserDefaults.standard.set(true, forKey: self.hasCompletedOnboardingKey)
+            self.onboardingWindow = nil
+            self.setupDictationController()
+            logInfo("Onboarding completed")
+        }
+        onboardingWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func showPreferences() {
