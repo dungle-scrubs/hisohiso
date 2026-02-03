@@ -44,6 +44,11 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
     private var enrollmentSamples: [[Float]] = []
     private var isRecordingEnrollment = false
 
+    // Wake word tab controls
+    private var wakeWordToggle: NSButton!
+    private var wakePhraseField: NSTextField!
+    private var wakeWordStatusLabel: NSTextField!
+
     init(modelManager: ModelManager, hotkeyManager: HotkeyManager? = nil) {
         self.modelManager = modelManager
         self.hotkeyManager = hotkeyManager
@@ -88,11 +93,16 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
         voiceTab.label = "Voice"
         voiceTab.view = createVoiceTab()
 
+        let wakeWordTab = NSTabViewItem(identifier: "wakeword")
+        wakeWordTab.label = "Wake Word"
+        wakeWordTab.view = createWakeWordTab()
+
         tabView.addTabViewItem(generalTab)
         tabView.addTabViewItem(hotkeyTab)
         tabView.addTabViewItem(modelTab)
         tabView.addTabViewItem(cloudTab)
         tabView.addTabViewItem(voiceTab)
+        tabView.addTabViewItem(wakeWordTab)
 
         contentView = tabView
     }
@@ -501,6 +511,97 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
         return view
     }
 
+    // MARK: - Wake Word Tab
+
+    private func createWakeWordTab() -> NSView {
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 340))
+        var y = 290
+
+        // Section: Wake Word Detection
+        view.addSubview(createSectionLabel("Wake Word Detection", y: y))
+        y -= 30
+
+        // Enable toggle
+        wakeWordToggle = NSButton(checkboxWithTitle: "Enable wake word detection", target: self, action: #selector(wakeWordToggleChanged))
+        wakeWordToggle.frame = NSRect(x: 20, y: y, width: 300, height: 20)
+        view.addSubview(wakeWordToggle)
+        y -= 25
+
+        let descLabel = NSTextField(wrappingLabelWithString: "Say your wake phrase to start recording without pressing any keys. Uses Whisper tiny for continuous listening.")
+        descLabel.frame = NSRect(x: 40, y: y - 20, width: 380, height: 40)
+        descLabel.font = .systemFont(ofSize: 11)
+        descLabel.textColor = .secondaryLabelColor
+        view.addSubview(descLabel)
+        y -= 60
+
+        // Wake phrase
+        let phraseLabel = NSTextField(labelWithString: "Wake Phrase:")
+        phraseLabel.frame = NSRect(x: 20, y: y, width: 100, height: 20)
+        view.addSubview(phraseLabel)
+
+        wakePhraseField = NSTextField(frame: NSRect(x: 130, y: y, width: 200, height: 22))
+        wakePhraseField.placeholderString = "hey hisohiso"
+        wakePhraseField.target = self
+        wakePhraseField.action = #selector(wakePhraseChanged)
+        view.addSubview(wakePhraseField)
+        y -= 30
+
+        let examplesLabel = NSTextField(wrappingLabelWithString: "Examples: \"hey computer\", \"hey kevin\", \"dictate\"")
+        examplesLabel.frame = NSRect(x: 130, y: y, width: 300, height: 20)
+        examplesLabel.font = .systemFont(ofSize: 11)
+        examplesLabel.textColor = .tertiaryLabelColor
+        view.addSubview(examplesLabel)
+        y -= 40
+
+        // Status
+        wakeWordStatusLabel = NSTextField(labelWithString: "")
+        wakeWordStatusLabel.frame = NSRect(x: 20, y: y, width: 400, height: 20)
+        wakeWordStatusLabel.font = .systemFont(ofSize: 11)
+        wakeWordStatusLabel.textColor = .secondaryLabelColor
+        view.addSubview(wakeWordStatusLabel)
+        y -= 40
+
+        // Warning about battery
+        let warningLabel = NSTextField(wrappingLabelWithString: "⚠️ Wake word detection keeps the microphone active and uses some CPU. This may impact battery life on laptops.")
+        warningLabel.frame = NSRect(x: 20, y: y - 20, width: 400, height: 40)
+        warningLabel.font = .systemFont(ofSize: 11)
+        warningLabel.textColor = .systemOrange
+        view.addSubview(warningLabel)
+
+        // Load current settings
+        let enabled = UserDefaults.standard.bool(forKey: "wakeWordEnabled")
+        wakeWordToggle.state = enabled ? .on : .off
+        wakePhraseField.stringValue = UserDefaults.standard.string(forKey: "wakePhrase") ?? "hey hisohiso"
+        updateWakeWordStatus()
+
+        return view
+    }
+
+    private func updateWakeWordStatus() {
+        let enabled = wakeWordToggle.state == .on
+        if enabled {
+            wakeWordStatusLabel.stringValue = "Wake word detection is active. Say \"\(wakePhraseField.stringValue)\" to start recording."
+            wakeWordStatusLabel.textColor = .systemGreen
+        } else {
+            wakeWordStatusLabel.stringValue = "Wake word detection is disabled."
+            wakeWordStatusLabel.textColor = .secondaryLabelColor
+        }
+    }
+
+    @objc private func wakeWordToggleChanged() {
+        UserDefaults.standard.set(wakeWordToggle.state == .on, forKey: "wakeWordEnabled")
+        updateWakeWordStatus()
+        // The WakeWordManager will observe this change via its @Published property
+        NotificationCenter.default.post(name: .wakeWordSettingsChanged, object: nil)
+    }
+
+    @objc private func wakePhraseChanged() {
+        let phrase = wakePhraseField.stringValue.lowercased().trimmingCharacters(in: .whitespaces)
+        UserDefaults.standard.set(phrase, forKey: "wakePhrase")
+        updateWakeWordStatus()
+        NotificationCenter.default.post(name: .wakeWordSettingsChanged, object: nil)
+    }
+
     // MARK: - Helpers
 
     private func createSectionLabel(_ text: String, y: Int) -> NSTextField {
@@ -867,4 +968,10 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
         NSApp.setActivationPolicy(.accessory)
         super.close()
     }
+}
+
+// MARK: - Notifications
+
+extension Notification.Name {
+    static let wakeWordSettingsChanged = Notification.Name("wakeWordSettingsChanged")
 }
