@@ -1,3 +1,4 @@
+import Accelerate
 import Cocoa
 import Foundation
 
@@ -35,6 +36,18 @@ final class DictationController: ObservableObject {
 
     /// Monitor for escape key to cancel recording
     private var escapeMonitor: Any?
+
+    /// Whether current recording was triggered by wake word (auto-stop on silence)
+    private var isWakeWordTriggered = false
+    
+    /// Silence detection for wake word auto-stop
+    private var silenceFrameCount = 0
+    private let silenceThresholdForStop = 25 // ~1.25s of silence to auto-stop (after grace period)
+    private let silenceRMSThreshold: Float = 0.01
+    
+    /// Grace period before silence detection starts (3 seconds = 60 frames at 50ms)
+    private var gracePeriodFrames = 0
+    private let gracePeriodThreshold = 60 // 3 seconds at 50ms per frame
 
     private var isInitialized = false
 
@@ -146,12 +159,19 @@ final class DictationController: ObservableObject {
         }
         // Ignore if transcribing or in error state
     }
-    
-    private func startRecording() async {
+
+    /// Start recording (can be called externally by wake word)
+    /// - Parameter fromWakeWord: If true, recording will auto-stop after silence
+    func startRecording(fromWakeWord: Bool = false) async {
         guard stateManager.isIdle else {
             logDebug("Cannot start recording: not in idle state")
             return
         }
+
+        // Track if this was triggered by wake word for auto-stop
+        isWakeWordTriggered = fromWakeWord
+        silenceFrameCount = 0
+        gracePeriodFrames = 0
 
         // Set state FIRST so release callback knows we're recording
         stateManager.setRecording()
@@ -164,7 +184,7 @@ final class DictationController: ObservableObject {
                 logInfo("Using AudioKit recorder")
             } else {
                 try audioRecorder.startRecording()
-                logInfo("Using AVAudioEngine recorder")
+                logInfo("Using AVAudioEngine recorder\(fromWakeWord ? " (wake word triggered, auto-stop enabled)" : "")")
             }
 
             // Notify RustyBar
@@ -238,6 +258,43 @@ final class DictationController: ObservableObject {
             let levels = RustyBarBridge.calculateAudioLevels(from: samples)
             self.rustyBarBridge.sendAudioLevels(levels)
             self.onAudioLevels?(levels)
+            
+            // Auto-stop on silence for wake word triggered recordings
+            if self.isWakeWordTriggered {
+                self.checkSilenceForAutoStop(samples: samples)
+            }
+        }
+    }
+    
+    /// Check for silence and auto-stop if wake word triggered
+    private func checkSilenceForAutoStop(samples: [Float]) {
+        guard !samples.isEmpty else { return }
+        
+        // Increment grace period counter
+        gracePeriodFrames += 1
+        
+        // Don't check for silence during grace period (first 3 seconds)
+        guard gracePeriodFrames >= gracePeriodThreshold else {
+            return
+        }
+        
+        // Calculate RMS
+        var rms: Float = 0
+        samples.withUnsafeBufferPointer { buffer in
+            vDSP_rmsqv(buffer.baseAddress!, 1, &rms, vDSP_Length(samples.count))
+        }
+        
+        if rms < silenceRMSThreshold {
+            silenceFrameCount += 1
+            if silenceFrameCount >= silenceThresholdForStop {
+                logInfo("Wake word recording: auto-stopping after \(silenceFrameCount) frames of silence (grace period: \(gracePeriodFrames) frames)")
+                Task { @MainActor in
+                    await self.stopRecordingAndTranscribe()
+                }
+            }
+        } else {
+            // Reset silence counter when speech detected
+            silenceFrameCount = 0
         }
     }
 
@@ -246,7 +303,8 @@ final class DictationController: ObservableObject {
         audioLevelTimer = nil
     }
 
-    private func stopRecordingAndTranscribe() async {
+    /// Stop recording and transcribe (can be called externally by wake word)
+    func stopRecordingAndTranscribe() async {
         guard stateManager.isRecording else {
             logWarning("Cannot stop recording: not recording")
             return
