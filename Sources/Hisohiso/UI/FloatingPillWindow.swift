@@ -1,6 +1,15 @@
 import Cocoa
 import SwiftUI
 
+/// View that responds to clicks
+private class ClickableView: NSView {
+    var onClick: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        onClick?()
+    }
+}
+
 /// Floating pill indicator at the bottom of the screen
 final class FloatingPillWindow: NSWindow {
     private var hostingView: NSHostingView<FloatingPillView>?
@@ -24,22 +33,32 @@ final class FloatingPillWindow: NSWindow {
         alphaValue = 1.0
     }
 
+    private var autoDismissTimer: Timer?
+
     /// Show the pill with the given state
     /// - Parameters:
     ///   - state: Current recording state
     ///   - onDismiss: Called when user dismisses the pill
     ///   - onRetry: Called when user clicks retry
     func show(state: RecordingState, onDismiss: @escaping () -> Void, onRetry: @escaping () -> Void) {
+        // Cancel any pending auto-dismiss
+        autoDismissTimer?.invalidate()
+        autoDismissTimer = nil
+
         if case .idle = state {
             orderOut(nil)
             return
         }
 
         // Use AppKit directly (SwiftUI NSHostingView has issues)
-        let pillView = NSView(frame: NSRect(x: 0, y: 0, width: 180, height: 44))
+        let pillView = ClickableView(frame: NSRect(x: 0, y: 0, width: 180, height: 44))
         pillView.wantsLayer = true
         pillView.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.85).cgColor
         pillView.layer?.cornerRadius = 22
+        pillView.onClick = { [weak self] in
+            self?.orderOut(nil)
+            onDismiss()
+        }
         
         let label = NSTextField(labelWithString: state.displayText)
         label.font = NSFont.systemFont(ofSize: 13, weight: .medium)
@@ -82,6 +101,14 @@ final class FloatingPillWindow: NSWindow {
         }
 
         makeKeyAndOrderFront(nil)
+
+        // Auto-dismiss error after 3 seconds
+        if case .error = state {
+            autoDismissTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
+                self?.orderOut(nil)
+                onDismiss()
+            }
+        }
     }
 
     /// Hide the pill
