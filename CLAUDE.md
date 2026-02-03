@@ -1,16 +1,16 @@
 # Hisohiso
 
-Local-first macOS dictation app using WhisperKit, activated by Globe key.
+Local-first macOS dictation app with multi-backend transcription, activated by Globe key.
 
 ## Design Decisions
 
 | Category | Decision |
 |----------|----------|
 | Distribution | Direct (notarized DMG), not App Store |
-| macOS target | 13 Ventura+ (Apple Silicon required) |
-| Transcription | Streaming (text appears as you speak) |
-| Default model | Parakeet v2 (English), download on demand |
-| Model storage | ~/Library/Application Support/Hisohiso |
+| macOS target | **14 Sonoma+** (Apple Silicon required, FluidAudio requires 14+) |
+| Transcription | Batch (full audio → text) with warmup for fast response |
+| Default model | **Parakeet v2** (English, best accuracy), download on demand |
+| Model storage | ~/Library/Application Support/Hisohiso (Whisper), ~/Library/Application Support/FluidAudio (Parakeet) |
 | Cloud | Optional fallback (OpenAI, Groq), API keys in Keychain |
 | Recording indicator | Floating pill (v0.1-v0.3), RustyBar IPC (v0.4+) |
 | Menu bar | Minimal (icon only, click→prefs, right-click→quit) |
@@ -21,7 +21,7 @@ Local-first macOS dictation app using WhisperKit, activated by Globe key.
 | Auto-launch | Default on (login item) |
 | Onboarding | Single checklist screen |
 | Audio input | System default only |
-| Timeout | 10 seconds, show error, offer retry |
+| Timeout | 30 seconds, show error, offer retry |
 | Testing | Unit + Integration (XCTest) |
 | Crash reporting | Sentry (production only) |
 | Error display | Floating pill with error state + retry button |
@@ -35,11 +35,25 @@ Local-first macOS dictation app using WhisperKit, activated by Globe key.
 ## Tech Stack
 
 - Swift 5.9+, SwiftUI, SwiftData
-- WhisperKit for on-device transcription (default: Parakeet v2)
+- **FluidAudio** for Parakeet transcription (default, best accuracy)
+- **WhisperKit** for Whisper transcription (multilingual fallback)
 - CGEventTap for global hotkey capture
 - AVAudioEngine for audio capture
 - CoreML speaker embedding model for voice verification (v0.5)
 - Sentry for crash reporting (production)
+
+## Transcription Models
+
+| Model | Backend | Size | Languages | WER (LibriSpeech) | Notes |
+|-------|---------|------|-----------|-------------------|-------|
+| **Parakeet v2** ⭐ | FluidAudio | 2.6 GB | English | **1.69%** | Best accuracy, default |
+| Parakeet v3 | FluidAudio | 2.7 GB | 25 EU langs | ~2% | Multilingual |
+| Whisper Large V3 Turbo | WhisperKit | 954 MB | 100+ langs | ~2.5% | Good multilingual |
+| Whisper Distil Large V3 | WhisperKit | 800 MB | 100+ langs | ~3% | Faster, smaller |
+| Whisper Small English | WhisperKit | 330 MB | English | ~4% | Lightweight |
+
+**Parakeet** = NVIDIA's FastConformer + TDT architecture (via FluidAudio CoreML)
+**Whisper** = OpenAI's encoder-decoder transformer (via WhisperKit CoreML)
 
 ## Build & Run
 
@@ -75,8 +89,8 @@ Then ask Claude: "Check the log output and help me debug this issue"
 
 ## Requirements
 
-- macOS 13 Ventura+
-- Apple Silicon (M1+) for WhisperKit Neural Engine acceleration
+- **macOS 14 Sonoma+** (FluidAudio requires 14+)
+- Apple Silicon (M1+) for Neural Engine acceleration
 - Accessibility permission (for global hotkey + text insertion)
 - Input Monitoring permission (for keyboard events)
 - Microphone permission
@@ -95,13 +109,12 @@ See [RUSTYBAR_INTEGRATION.md](./RUSTYBAR_INTEGRATION.md) for:
 - `HotkeyManager.swift` - Globe + configurable alternative hotkey
 - `AudioRecorder.swift` - AVAudioEngine audio capture
 - `AudioFeedback.swift` - Start/stop click sounds
-- `Transcriber.swift` - WhisperKit transcription wrapper
-- `StreamingTranscriber.swift` - Real-time streaming transcription
+- `Transcriber.swift` - Multi-backend transcription (FluidAudio + WhisperKit)
+- `ModelManager.swift` - Download and manage models for both backends
 - `TextFormatter.swift` - Smart formatting (capitalize, filler removal)
 - `TextInserter.swift` - Accessibility API text insertion
 - `RustyBarBridge.swift` - IPC to RustyBar (see RUSTYBAR_INTEGRATION.md)
 - `HistoryStore.swift` - SwiftData persistence for transcription history
-- `ModelManager.swift` - Download and manage Whisper models
 - `KeychainManager.swift` - API keys + voice embedding storage
 - `Logger.swift` - File + OSLog logging (tail for LLM debugging)
 - `VoiceVerifier.swift` - Speaker verification (v0.5)
