@@ -60,6 +60,12 @@ final class AudioRecorder {
 
     /// Called periodically with audio samples for streaming transcription
     var onAudioChunk: (([Float]) -> Void)?
+    
+    /// Called continuously with audio samples when monitoring (for wake word detection)
+    var onMonitoringSamples: ((_ samples: [Float], _ sampleRate: Double) -> Void)?
+    
+    /// Whether monitoring mode is active (continuous listening without recording)
+    private var isMonitoring = false
 
     /// UserDefaults key for persisted device selection
     private static let selectedDeviceKey = "selectedAudioDeviceUID"
@@ -316,6 +322,90 @@ final class AudioRecorder {
         bufferLock.unlock()
 
         logInfo("Recording cancelled")
+    }
+    
+    // MARK: - Monitoring Mode (for wake word detection)
+    
+    /// Start continuous audio monitoring without recording
+    /// Audio samples are sent to `onMonitoringSamples` callback
+    func startMonitoring() throws {
+        guard !isMonitoring && !isRecording else {
+            logDebug("Already monitoring or recording")
+            return
+        }
+        
+        try applySelectedDevice()
+        
+        let inputNode = engine.inputNode
+        let inputFormat = inputNode.outputFormat(forBus: 0)
+        
+        guard inputFormat.sampleRate > 0 else {
+            throw AudioRecorderError.noInputNode
+        }
+        
+        logInfo("Starting audio monitoring at \(inputFormat.sampleRate)Hz")
+        
+        // Install tap for monitoring
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+            self?.processMonitoringBuffer(buffer, sampleRate: inputFormat.sampleRate)
+        }
+        
+        do {
+            try engine.start()
+            isMonitoring = true
+            logInfo("Audio monitoring started")
+        } catch {
+            inputNode.removeTap(onBus: 0)
+            throw AudioRecorderError.engineStartFailed(error)
+        }
+    }
+    
+    /// Stop audio monitoring
+    func stopMonitoring() {
+        guard isMonitoring else { return }
+        
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        isMonitoring = false
+        logInfo("Audio monitoring stopped")
+    }
+    
+    /// Pause monitoring (when recording starts)
+    func pauseMonitoring() {
+        guard isMonitoring else { return }
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        // Keep isMonitoring true so we know to resume
+        logDebug("Audio monitoring paused")
+    }
+    
+    /// Resume monitoring (after recording stops)
+    func resumeMonitoring() {
+        guard isMonitoring && !isRecording else { return }
+        
+        do {
+            let inputNode = engine.inputNode
+            let inputFormat = inputNode.outputFormat(forBus: 0)
+            
+            inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+                self?.processMonitoringBuffer(buffer, sampleRate: inputFormat.sampleRate)
+            }
+            
+            try engine.start()
+            logDebug("Audio monitoring resumed")
+        } catch {
+            logError("Failed to resume monitoring: \(error)")
+        }
+    }
+    
+    private func processMonitoringBuffer(_ buffer: AVAudioPCMBuffer, sampleRate: Double) {
+        guard let channelData = buffer.floatChannelData else { return }
+        
+        let frameCount = Int(buffer.frameLength)
+        let samples = Array(UnsafeBufferPointer(start: channelData[0], count: frameCount))
+        
+        // Send to callback
+        onMonitoringSamples?(samples, sampleRate)
     }
 
     /// Get the most recent audio samples (for visualization)
