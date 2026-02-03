@@ -70,22 +70,16 @@ struct TextFormatter {
         let sortedFillers = fillerWords.sorted { $0.count > $1.count }
 
         for filler in sortedFillers {
-            // Match filler words with word boundaries
-            // Handle: start of string, after space, before space/punctuation
-            let patterns = [
-                "^" + NSRegularExpression.escapedPattern(for: filler) + "\\s*,?\\s*",  // Start
-                "\\s+" + NSRegularExpression.escapedPattern(for: filler) + "\\s*,?\\s+",  // Middle
-                "\\s*,?\\s*" + NSRegularExpression.escapedPattern(for: filler) + "$"  // End
-            ]
+            // Use word boundary \b to avoid partial matches (e.g., "um" in "umbrella")
+            let escapedFiller = NSRegularExpression.escapedPattern(for: filler)
+            let pattern = "\\b" + escapedFiller + "\\b\\s*,?\\s*"
 
-            for pattern in patterns {
-                if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
-                    result = regex.stringByReplacingMatches(
-                        in: result,
-                        range: NSRange(result.startIndex..., in: result),
-                        withTemplate: patterns.first == pattern ? "" : " "
-                    )
-                }
+            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
+                result = regex.stringByReplacingMatches(
+                    in: result,
+                    range: NSRange(result.startIndex..., in: result),
+                    withTemplate: ""
+                )
             }
         }
 
