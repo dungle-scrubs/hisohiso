@@ -37,9 +37,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusItem()
         setupFloatingPill()
         
-        // TODO: Fix onboarding window display issue
-        // For now, skip onboarding and go straight to dictation
-        setupDictationController()
+        // Check if first launch
+        if !UserDefaults.standard.bool(forKey: hasCompletedOnboardingKey) {
+            showOnboarding()
+        } else {
+            setupDictationController()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -156,7 +159,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.setupDictationController()
             logInfo("Onboarding completed")
         }
-        onboardingWindow?.makeKeyAndOrderFront(nil)
+        
+        if let window = onboardingWindow {
+            window.level = .floating
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
+            logInfo("Onboarding window: frame=\(window.frame), isVisible=\(window.isVisible)")
+        }
         NSApp.activate(ignoringOtherApps: true)
     }
 

@@ -139,6 +139,7 @@ Tests cover: TextFormatter, HistoryStore, RustyBarBridge, HotkeyManager
 | SwiftUI NSHostingView not rendering in NSWindow | 30+ min | Use pure AppKit (NSView, NSTextField, etc.) instead. SwiftUI in menu bar apps has issues. |
 | Floating window not appearing | 20 min | Use `.screenSaver` window level, call `makeKeyAndOrderFront(nil)`. |
 | NSWindow created but invisible | 15 min | Ensure `contentView` is set, frame is valid, and window is ordered front on main thread. |
+| NSWindow not appearing in menu bar app | 10 min | Set `window.level = .floating` and call `orderFrontRegardless()` not just `makeKeyAndOrderFront`. |
 
 ### WhisperKit / Transcription
 
@@ -146,6 +147,7 @@ Tests cover: TextFormatter, HistoryStore, RustyBarBridge, HotkeyManager
 |---------|-------------|----------|
 | Transcription timeout with small-en model | 15 min | Use tiny model for dev/testing. small-en can take 15+ seconds. |
 | WhisperKit hanging on subsequent transcriptions | 10 min | Model initialization is slow; keep instance alive. Don't reinitialize per-transcription. |
+| First transcription slow (3+ seconds) | 5 min | Warmup Neural Engine on startup with silent audio transcription. Subsequent calls are instant (~0.1s). |
 
 ### Swift Concurrency
 
