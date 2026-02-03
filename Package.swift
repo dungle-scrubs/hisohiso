@@ -11,14 +11,16 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/argmaxinc/WhisperKit", from: "0.9.0"),
-        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.7.9")
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.7.9"),
+        .package(url: "https://github.com/AudioKit/AudioKit.git", from: "5.6.0")
     ],
     targets: [
         .executableTarget(
             name: "Hisohiso",
             dependencies: [
                 .product(name: "WhisperKit", package: "WhisperKit"),
-                .product(name: "FluidAudio", package: "FluidAudio")
+                .product(name: "FluidAudio", package: "FluidAudio"),
+                .product(name: "AudioKit", package: "AudioKit")
             ],
             path: "Sources/Hisohiso",
             resources: [
