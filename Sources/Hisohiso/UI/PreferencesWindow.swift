@@ -4,6 +4,7 @@ import ServiceManagement
 /// Preferences window for Hisohiso settings
 final class PreferencesWindow: NSWindow {
     private var modelManager: ModelManager
+    private var hotkeyManager: HotkeyManager?
     private var audioFeedbackToggle: NSButton!
     private var launchAtLoginToggle: NSButton!
     private var modelPopup: NSPopUpButton!
@@ -11,12 +12,14 @@ final class PreferencesWindow: NSWindow {
     private var downloadButton: NSButton!
     private var progressIndicator: NSProgressIndicator!
     private var statusLabel: NSTextField!
+    private var hotkeyRecorder: HotkeyRecorderView!
 
-    init(modelManager: ModelManager) {
+    init(modelManager: ModelManager, hotkeyManager: HotkeyManager? = nil) {
         self.modelManager = modelManager
+        self.hotkeyManager = hotkeyManager
 
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 500, height: 450),
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 520),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -35,10 +38,10 @@ final class PreferencesWindow: NSWindow {
     }
 
     private func setupContent() {
-        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 500, height: 450))
+        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 500, height: 520))
         contentView.wantsLayer = true
 
-        var y = 400
+        var y = 470
 
         // MARK: - General Section
         let generalLabel = createSectionLabel("General", y: y)
@@ -55,6 +58,27 @@ final class PreferencesWindow: NSWindow {
         launchAtLoginToggle = NSButton(checkboxWithTitle: "Launch at login", target: self, action: #selector(launchAtLoginChanged))
         launchAtLoginToggle.frame = NSRect(x: 30, y: y, width: 300, height: 20)
         contentView.addSubview(launchAtLoginToggle)
+        y -= 50
+
+        // MARK: - Hotkey Section
+        let hotkeyLabel = createSectionLabel("Alternative Hotkey", y: y)
+        contentView.addSubview(hotkeyLabel)
+        y -= 35
+
+        let hotkeyDescription = NSTextField(labelWithString: "In addition to Globe key, use this shortcut to dictate:")
+        hotkeyDescription.frame = NSRect(x: 30, y: y, width: 400, height: 20)
+        hotkeyDescription.font = .systemFont(ofSize: 12)
+        hotkeyDescription.textColor = .secondaryLabelColor
+        contentView.addSubview(hotkeyDescription)
+        y -= 30
+
+        hotkeyRecorder = HotkeyRecorderView(frame: NSRect(x: 30, y: y, width: 200, height: 28))
+        hotkeyRecorder.keyCombo = hotkeyManager?.currentHotkey
+        hotkeyRecorder.onHotkeyRecorded = { [weak self] keyCombo in
+            self?.hotkeyManager?.setHotkey(keyCombo)
+            logInfo("Alternative hotkey changed to: \(keyCombo?.displayString ?? "disabled")")
+        }
+        contentView.addSubview(hotkeyRecorder)
         y -= 50
 
         // MARK: - Transcription Section

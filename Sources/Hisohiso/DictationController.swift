@@ -10,6 +10,7 @@ final class DictationController: ObservableObject {
     private let textFormatter = TextFormatter()
     private let audioFeedback = AudioFeedback()
     private let modelManager: ModelManager
+    private let hotkeyManager: HotkeyManager?
     private let historyStore = HistoryStore.shared
 
     @Published private(set) var stateManager = RecordingStateManager()
@@ -19,8 +20,9 @@ final class DictationController: ObservableObject {
 
     private var isInitialized = false
 
-    init(modelManager: ModelManager) {
+    init(modelManager: ModelManager, hotkeyManager: HotkeyManager? = nil) {
         self.modelManager = modelManager
+        self.hotkeyManager = hotkeyManager
         setupCallbacks()
     }
 
@@ -49,6 +51,9 @@ final class DictationController: ObservableObject {
             throw DictationError.eventTapFailed
         }
 
+        // Start alternative hotkey monitoring (if configured)
+        hotkeyManager?.start()
+
         isInitialized = true
         logInfo("DictationController initialized")
     }
@@ -56,6 +61,7 @@ final class DictationController: ObservableObject {
     /// Stop the controller
     func shutdown() {
         globeMonitor.stop()
+        hotkeyManager?.stop()
         if stateManager.isRecording {
             audioRecorder.cancelRecording()
         }
@@ -69,15 +75,26 @@ final class DictationController: ObservableObject {
             guard let self else { return }
             Task { await self.toggleRecording() }
         }
-        
+
         // Hold: start recording
         globeMonitor.onGlobeHoldStart = { [weak self] in
             guard let self else { return }
             Task { await self.startRecording() }
         }
-        
+
         // Release after hold: stop recording
         globeMonitor.onGlobeHoldEnd = { [weak self] in
+            guard let self else { return }
+            Task { await self.stopRecordingAndTranscribe() }
+        }
+
+        // Alternative hotkey: hold to record
+        hotkeyManager?.onHotkeyDown = { [weak self] in
+            guard let self else { return }
+            Task { await self.startRecording() }
+        }
+
+        hotkeyManager?.onHotkeyUp = { [weak self] in
             guard let self else { return }
             Task { await self.stopRecordingAndTranscribe() }
         }

@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var floatingPill: FloatingPillWindow?
     private var dictationController: DictationController?
     private var modelManager: ModelManager?
+    private var hotkeyManager: HotkeyManager?
     private var stateObserver: AnyCancellable?
     private var onboardingWindow: OnboardingWindow?
     private var preferencesWindow: PreferencesWindow?
@@ -53,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         dictationController?.shutdown()
         historyHotkeyMonitor?.stop()
+        hotkeyManager?.stop()
         logInfo("Hisohiso shutting down")
     }
 
@@ -149,7 +151,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupDictationController() {
         guard let modelManager else { return }
-        dictationController = DictationController(modelManager: modelManager)
+
+        // Setup alternative hotkey manager
+        hotkeyManager = HotkeyManager()
+
+        dictationController = DictationController(modelManager: modelManager, hotkeyManager: hotkeyManager)
 
         // Observe state changes to update floating pill
         if let controller = dictationController {
@@ -241,13 +247,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showPreferences() {
         logInfo("Show preferences")
-        
+
         guard let modelManager else { return }
-        
+
         if preferencesWindow == nil {
-            preferencesWindow = PreferencesWindow(modelManager: modelManager)
+            preferencesWindow = PreferencesWindow(modelManager: modelManager, hotkeyManager: hotkeyManager)
         }
-        
+
         if let window = preferencesWindow {
             window.level = .normal
             window.makeKeyAndOrderFront(nil)
