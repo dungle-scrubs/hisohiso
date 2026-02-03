@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dictationController: DictationController?
     private var modelManager: ModelManager?
     private var hotkeyManager: HotkeyManager?
+    private var wakeWordManager: WakeWordManager?
     private var stateObserver: AnyCancellable?
     private var onboardingWindow: OnboardingWindow?
     private var preferencesWindow: PreferencesWindow?
@@ -199,6 +200,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] state in
                     self?.updateFloatingPill(for: state)
+                    // Resume wake word listening and monitoring when idle
+                    if case .idle = state {
+                        if self?.wakeWordManager?.isEnabled == true {
+                            self?.dictationController?.audioRecorder.resumeMonitoring()
+                            self?.wakeWordManager?.resumeListening()
+                        }
+                    }
                 }
 
             // Forward audio levels to floating pill
@@ -211,9 +219,80 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { [weak self] in
             do {
                 try await self?.dictationController?.initialize()
+                // Setup wake word after dictation is ready
+                await self?.setupWakeWord()
             } catch {
                 logError("Failed to initialize dictation controller: \(error)")
                 self?.showInitializationError(error)
+            }
+        }
+    }
+
+    private func setupWakeWord() async {
+        logInfo("Setting up wake word manager...")
+        wakeWordManager = WakeWordManager()
+        
+        // Connect AudioRecorder's monitoring to WakeWordManager
+        dictationController?.audioRecorder.onMonitoringSamples = { [weak self] samples, sampleRate in
+            self?.wakeWordManager?.processAudioSamples(samples, sampleRate: sampleRate)
+        }
+        
+        // When wake word detected, start recording
+        wakeWordManager?.onWakeWordDetected = { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                guard self.dictationController?.stateManager.isIdle == true else { return }
+                
+                logInfo("Wake word triggered recording")
+                // Pause monitoring and wake word listening while recording
+                self.dictationController?.audioRecorder.pauseMonitoring()
+                self.wakeWordManager?.pauseListening()
+                // Start recording with auto-stop on silence
+                await self.dictationController?.startRecording(fromWakeWord: true)
+            }
+        }
+        
+        // Initialize Whisper tiny for wake word
+        if wakeWordManager?.isEnabled == true {
+            do {
+                try await wakeWordManager?.initialize()
+            } catch {
+                logError("Failed to initialize wake word: \(error)")
+            }
+        }
+        
+        // Start monitoring if enabled
+        logInfo("Wake word enabled: \(wakeWordManager?.isEnabled ?? false)")
+        if wakeWordManager?.isEnabled == true {
+            do {
+                try dictationController?.audioRecorder.startMonitoring()
+                wakeWordManager?.startListening()
+                logInfo("Wake word monitoring started")
+            } catch {
+                logError("Failed to start wake word monitoring: \(error)")
+            }
+        }
+        
+        // Listen for settings changes
+        NotificationCenter.default.addObserver(
+            forName: .wakeWordSettingsChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                if self.wakeWordManager?.isEnabled == true {
+                    do {
+                        try await self.wakeWordManager?.initialize()
+                        try self.dictationController?.audioRecorder.startMonitoring()
+                        self.wakeWordManager?.startListening()
+                    } catch {
+                        logError("Failed to start wake word: \(error)")
+                    }
+                } else {
+                    self.wakeWordManager?.stopListening()
+                    self.dictationController?.audioRecorder.stopMonitoring()
+                }
             }
         }
     }
