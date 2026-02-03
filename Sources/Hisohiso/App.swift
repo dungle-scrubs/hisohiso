@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var modelManager: ModelManager?
     private var stateObserver: AnyCancellable?
     private var onboardingWindow: OnboardingWindow?
+    private var preferencesWindow: PreferencesWindow?
     
     /// UserDefaults key for tracking first launch
     private let hasCompletedOnboardingKey = "hasCompletedOnboarding"
@@ -171,13 +172,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showPreferences() {
         logInfo("Show preferences")
-        // TODO: Implement preferences window in v0.3
-        let alert = NSAlert()
-        alert.messageText = "Hisohiso"
-        alert.informativeText = "Preferences will be available in a future version.\n\nHold the Globe key to record, release to transcribe."
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
+        
+        guard let modelManager else { return }
+        
+        if preferencesWindow == nil {
+            preferencesWindow = PreferencesWindow(modelManager: modelManager)
+        }
+        
+        if let window = preferencesWindow {
+            window.level = .floating
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
+        }
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func showInitializationError(_ error: Error) {

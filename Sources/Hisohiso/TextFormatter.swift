@@ -16,17 +16,24 @@ struct TextFormatter {
 
     /// Initialize the text formatter
     /// - Parameters:
-    ///   - fillerWords: Words to remove (default: common filler words)
+    ///   - fillerWords: Words to remove (default: from UserDefaults or common filler words)
     ///   - removeFillers: Whether to remove filler words (default: true)
     ///   - capitalizeFirst: Capitalize first character (default: true)
     ///   - capitalizeSentences: Capitalize after sentence-ending punctuation (default: true)
     init(
-        fillerWords: Set<String> = defaultFillerWords,
+        fillerWords: Set<String>? = nil,
         removeFillers: Bool = true,
         capitalizeFirst: Bool = true,
         capitalizeSentences: Bool = true
     ) {
-        self.fillerWords = fillerWords
+        // Load from UserDefaults if not provided
+        if let fillerWords {
+            self.fillerWords = fillerWords
+        } else if let saved = UserDefaults.standard.stringArray(forKey: "fillerWords") {
+            self.fillerWords = Set(saved)
+        } else {
+            self.fillerWords = Self.defaultFillerWords
+        }
         self.removeFillers = removeFillers
         self.capitalizeFirst = capitalizeFirst
         self.capitalizeSentences = capitalizeSentences

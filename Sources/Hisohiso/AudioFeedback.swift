@@ -5,8 +5,10 @@ final class AudioFeedback {
     private var startSound: NSSound?
     private var stopSound: NSSound?
 
-    /// Whether audio feedback is enabled
-    var isEnabled: Bool = true
+    /// Whether audio feedback is enabled (reads from UserDefaults)
+    var isEnabled: Bool {
+        UserDefaults.standard.object(forKey: "audioFeedbackEnabled") as? Bool ?? true
+    }
 
     init() {
         // Pre-load system sounds for instant playback
