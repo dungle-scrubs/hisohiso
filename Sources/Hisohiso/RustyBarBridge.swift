@@ -156,7 +156,7 @@ extension RustyBarBridge {
                 // Calculate RMS for this chunk
                 let rms = sqrt(chunk.map { $0 * $0 }.reduce(0, +) / Float(chunk.count))
 
-                // Normalize to 0-100 (assuming typical speech RMS is 0.01-0.3)
+                // Normalize to 0-100 (raw values, UI will amplify as needed)
                 let normalized = min(100, max(0, Int(rms * 300)))
                 levels.append(UInt8(normalized))
             } else {

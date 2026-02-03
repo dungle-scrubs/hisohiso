@@ -200,6 +200,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .sink { [weak self] state in
                     self?.updateFloatingPill(for: state)
                 }
+
+            // Forward audio levels to floating pill
+            controller.onAudioLevels = { [weak self] levels in
+                self?.floatingPill?.updateAudioLevels(levels)
+            }
         }
 
         // Initialize in background
