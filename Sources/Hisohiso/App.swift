@@ -37,6 +37,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         logInfo("Hisohiso starting...")
         logInfo("Log file: \(Logger.shared.logFilePath)")
 
+        // Handle CLI arguments (e.g., --history from RustyBar click)
+        handleLaunchArguments()
+
         modelManager = ModelManager()
         setupStatusItem()
         setupFloatingPill()
@@ -56,6 +59,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         historyHotkeyMonitor?.stop()
         hotkeyManager?.stop()
         logInfo("Hisohiso shutting down")
+    }
+
+    /// Handle reopen (e.g., clicking dock icon or `open -a Hisohiso`)
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        return true
+    }
+
+    /// Handle Apple Events (for `open -a Hisohiso --args --history`)
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            if url.scheme == "hisohiso" {
+                handleURL(url)
+            }
+        }
+    }
+
+    private func handleURL(_ url: URL) {
+        logInfo("Handling URL: \(url)")
+        if url.host == "history" {
+            toggleHistoryPalette()
+        }
+    }
+
+    private func handleLaunchArguments() {
+        let args = CommandLine.arguments
+
+        if args.contains("--history") {
+            logInfo("Launched with --history flag, showing history palette")
+            // Delay slightly to ensure app is fully initialized
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.toggleHistoryPalette()
+            }
+        }
     }
 
     // MARK: - Setup
@@ -179,6 +215,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateFloatingPill(for state: RecordingState) {
         logInfo("updateFloatingPill called with state: \(state)")
+
+        // Check if pill should be shown
+        let showPill = RustyBarBridge.shared.shouldShowFloatingPill
+
+        // Always show pill for errors (RustyBar can't show error details)
+        let isError = { if case .error = state { return true } else { return false } }()
+
+        if !showPill && !isError {
+            // Hide pill
+            floatingPill?.show(
+                state: .idle,
+                onDismiss: {},
+                onRetry: {}
+            )
+            return
+        }
+
         floatingPill?.show(
             state: state,
             onDismiss: { [weak self] in
@@ -205,6 +258,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showContextMenu() {
         let menu = NSMenu()
 
+        // Microphone submenu
+        let microphoneItem = NSMenuItem(title: "Microphone", action: nil, keyEquivalent: "")
+        let microphoneMenu = NSMenu()
+        let devices = AudioRecorder.availableInputDevices()
+        let currentDevice = dictationController?.audioRecorder.currentDevice() ?? .systemDefault
+
+        for device in devices {
+            let item = NSMenuItem(title: device.name, action: #selector(selectMicrophone(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = device
+            item.state = (device == currentDevice) ? .on : .off
+            microphoneMenu.addItem(item)
+        }
+        microphoneItem.submenu = microphoneMenu
+        menu.addItem(microphoneItem)
+
+        // Transcription model submenu
+        let modelItem = NSMenuItem(title: "Transcription Model", action: nil, keyEquivalent: "")
+        let modelMenu = NSMenu()
+        let currentModel = UserDefaults.standard.string(forKey: "selectedModel") ?? "parakeet-v2"
+        let models = [
+            ("Parakeet v2 (English)", "parakeet-v2"),
+            ("Whisper Large v3 Turbo", "large-v3-turbo"),
+            ("Whisper Small (English)", "small-en")
+        ]
+        for (name, id) in models {
+            let item = NSMenuItem(title: name, action: #selector(selectModel(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = id
+            item.state = (id == currentModel) ? .on : .off
+            modelMenu.addItem(item)
+        }
+        modelItem.submenu = modelMenu
+        menu.addItem(modelItem)
+
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Test UI", action: #selector(testUI), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Preferences...", action: #selector(showPreferences), keyEquivalent: ","))
@@ -214,6 +303,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.menu = menu
         statusItem?.button?.performClick(nil)
         statusItem?.menu = nil // Reset so left-click works
+    }
+
+    @objc private func selectMicrophone(_ sender: NSMenuItem) {
+        guard let device = sender.representedObject as? AudioInputDevice else { return }
+        dictationController?.audioRecorder.setInputDevice(device)
+        logInfo("Microphone selected: \(device.name)")
+    }
+
+    @objc private func selectModel(_ sender: NSMenuItem) {
+        guard let modelId = sender.representedObject as? String else { return }
+        UserDefaults.standard.set(modelId, forKey: "selectedModel")
+        logInfo("Model selected: \(modelId)")
+        // Reinitialize transcriber with new model would go here
     }
     
     @objc private func testUI() {
