@@ -70,11 +70,13 @@ open Package.swift
 ## Pre-commit Hooks
 
 ```bash
-brew install swiftlint swiftformat pre-commit
+brew install swiftlint swiftformat pre-commit trufflehog
 pre-commit install
+pre-commit install --hook-type pre-push
 ```
 
-Hooks run: SwiftFormat → SwiftLint → swift build (type check)
+Pre-commit hooks run: SwiftFormat → SwiftLint → swift build (type check)
+Pre-push hooks run: TruffleHog secret scan
 
 ## Dev Logging
 

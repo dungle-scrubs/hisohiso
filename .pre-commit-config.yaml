@@ -19,3 +19,11 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+
+      - id: trufflehog
+        name: TruffleHog (pre-push)
+        entry: scripts/trufflehog-pre-push.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
