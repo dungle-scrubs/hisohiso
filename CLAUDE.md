@@ -12,10 +12,10 @@ Local-first macOS dictation app with multi-backend transcription, activated by G
 | Default model | **Parakeet v2** (English, best accuracy), download on demand |
 | Model storage | ~/Library/Application Support/Hisohiso (Whisper), ~/Library/Application Support/FluidAudio (Parakeet) |
 | Cloud | Optional fallback (OpenAI, Groq), API keys in Keychain |
-| Recording indicator | Floating pill (v0.1-v0.3), RustyBar IPC (v0.4+) |
+| Recording indicator | Floating pill (v0.1-v0.3), Sinew IPC (v0.4+) |
 | Menu bar | Minimal (icon only, click→prefs, right-click→quit) |
 | Text formatting | Smart local rules (capitalize, punctuation, remove filler words) |
-| History | SwiftData, kept forever, accessible via RustyBar popup |
+| History | SwiftData, kept forever, accessible via Sinew module |
 | Hotkey | Globe key + configurable alternative (modifier-only supported) |
 | Audio feedback | Subtle click sounds on start/stop |
 | Auto-launch | Default on (login item) |
@@ -95,12 +95,12 @@ Then ask Claude: "Check the log output and help me debug this issue"
 - Input Monitoring permission (for keyboard events)
 - Microphone permission
 
-## RustyBar Integration
+## Sinew Integration
 
 See [RUSTYBAR_INTEGRATION.md](./RUSTYBAR_INTEGRATION.md) for:
-- IPC protocol (`set hisohiso <state>`)
-- Rust module implementation
-- History popup support
+- IPC protocol (`set <module_id> key=value ...`)
+- Sinew external module wiring
+- Runtime command examples
 - Config examples
 
 ## Key Files
@@ -113,7 +113,7 @@ See [RUSTYBAR_INTEGRATION.md](./RUSTYBAR_INTEGRATION.md) for:
 - `ModelManager.swift` - Download and manage models for both backends
 - `TextFormatter.swift` - Smart formatting (capitalize, filler removal)
 - `TextInserter.swift` - Accessibility API text insertion
-- `RustyBarBridge.swift` - IPC to RustyBar (see RUSTYBAR_INTEGRATION.md)
+- `RustyBarBridge.swift` - IPC to Sinew (see RUSTYBAR_INTEGRATION.md)
 - `HistoryStore.swift` - SwiftData persistence for transcription history
 - `KeychainManager.swift` - API keys + voice embedding storage
 - `Logger.swift` - File + OSLog logging (tail for LLM debugging)
@@ -125,7 +125,7 @@ See [RUSTYBAR_INTEGRATION.md](./RUSTYBAR_INTEGRATION.md) for:
 swift test
 ```
 
-Tests cover: TextFormatter, HistoryStore, RustyBarBridge, HotkeyManager
+Tests cover: TextFormatter, HistoryStore, SinewBridge/RustyBarBridge compatibility, HotkeyManager
 
 ## Lessons Learned
 

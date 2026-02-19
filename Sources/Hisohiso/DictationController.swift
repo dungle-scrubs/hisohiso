@@ -16,19 +16,18 @@ final class DictationController: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: "useAudioKit") }
     }
     private let textInserter = TextInserter()
-    private let textFormatter = TextFormatter()
     private let audioFeedback = AudioFeedback()
     private let modelManager: ModelManager
     private let hotkeyManager: HotkeyManager?
     private let historyStore = HistoryStore.shared
-    private let rustyBarBridge = RustyBarBridge.shared
+    private let sinewBridge = SinewBridge.shared
 
     @Published private(set) var stateManager = RecordingStateManager()
 
     /// Track recording start time for duration calculation
     private var recordingStartTime: Date?
 
-    /// Timer for sending audio levels to RustyBar
+    /// Timer for sending audio levels to Sinew/floating UI.
     private var audioLevelTimer: Timer?
 
     /// Callback for audio level updates (for UI waveform)
@@ -106,15 +105,25 @@ final class DictationController: ObservableObject {
     }
 
     private func setupCallbacks() {
+        logInfo("Setting up callbacks...")
+        
         // Tap: toggle recording on/off
         globeMonitor.onGlobeTap = { [weak self] in
-            guard let self else { return }
+            guard let self else { 
+                logWarning("onGlobeTap: self is nil")
+                return 
+            }
+            logInfo("Globe tap received, calling toggleRecording")
             Task { await self.toggleRecording() }
         }
 
         // Hold: start recording, or stop if already recording from tap
         globeMonitor.onGlobeHoldStart = { [weak self] in
-            guard let self else { return }
+            guard let self else {
+                logWarning("onGlobeHoldStart: self is nil")
+                return
+            }
+            logInfo("Globe hold start received")
             // If already recording (from a tap), stop immediately
             if self.stateManager.isRecording {
                 logInfo("Hold started while recording - stopping immediately")
@@ -126,7 +135,10 @@ final class DictationController: ObservableObject {
 
         // Release after hold: stop recording (only if still recording)
         globeMonitor.onGlobeHoldEnd = { [weak self] in
-            guard let self else { return }
+            guard let self else {
+                logWarning("onGlobeHoldEnd: self is nil")
+                return
+            }
             // Only stop if still recording (might have been stopped by hold-start)
             guard self.stateManager.isRecording else { return }
             Task { await self.stopRecordingAndTranscribe() }
@@ -152,7 +164,9 @@ final class DictationController: ObservableObject {
     }
 
     private func toggleRecording() async {
+        logInfo("toggleRecording called (state: \(stateManager.state))")
         if stateManager.isIdle {
+            logInfo("State is idle, starting recording")
             await startRecording()
         } else if stateManager.isRecording {
             await stopRecordingAndTranscribe()
@@ -160,11 +174,24 @@ final class DictationController: ObservableObject {
         // Ignore if transcribing or in error state
     }
 
+    /// Reinitialize the transcriber with the currently selected model.
+    func reloadSelectedModel() async throws {
+        guard stateManager.isIdle else {
+            throw DictationError.cannotChangeModelWhileBusy
+        }
+
+        let selectedModel = modelManager.selectedModel
+        try await transcriber.initialize(model: selectedModel)
+        logInfo("Transcriber model reloaded: \(selectedModel.rawValue)")
+    }
+
     /// Start recording (can be called externally by wake word)
     /// - Parameter fromWakeWord: If true, recording will auto-stop after silence
     func startRecording(fromWakeWord: Bool = false) async {
+        logInfo("startRecording called (fromWakeWord: \(fromWakeWord), currentState: \(stateManager.state))")
+        
         guard stateManager.isIdle else {
-            logDebug("Cannot start recording: not in idle state")
+            logWarning("Cannot start recording: not in idle state (state: \(stateManager.state))")
             return
         }
 
@@ -187,10 +214,10 @@ final class DictationController: ObservableObject {
                 logInfo("Using AVAudioEngine recorder\(fromWakeWord ? " (wake word triggered, auto-stop enabled)" : "")")
             }
 
-            // Notify RustyBar
-            rustyBarBridge.sendState(.recording)
+            // Notify Sinew
+            sinewBridge.sendState(.recording)
 
-            // Start audio level updates for RustyBar waveform
+            // Start audio level updates for Sinew/floating waveform
             startAudioLevelUpdates()
 
             // Start escape key monitor to cancel recording
@@ -198,7 +225,7 @@ final class DictationController: ObservableObject {
         } catch {
             logError("Failed to start recording: \(error)")
             stateManager.setError("Failed to start recording")
-            rustyBarBridge.sendState(.error(message: "Failed to start"))
+            sinewBridge.sendState(.error(message: "Failed to start"))
         }
     }
 
@@ -217,7 +244,7 @@ final class DictationController: ObservableObject {
         }
 
         stateManager.setIdle()
-        rustyBarBridge.sendState(.idle)
+        sinewBridge.sendState(.idle)
     }
 
     private func startEscapeMonitor() {
@@ -244,25 +271,30 @@ final class DictationController: ObservableObject {
     private func startAudioLevelUpdates() {
         audioLevelTimer?.invalidate()
         audioLevelTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-            guard let self else { return }
-
-            // Get recent audio samples from recorder
-            let samples: [Float]
-            if self.useAudioKit {
-                samples = self.audioKitRecorder.getRecentSamples(count: 1600)
-            } else {
-                samples = self.audioRecorder.getRecentSamples(count: 1600)
+            Task { @MainActor [weak self] in
+                self?.handleAudioLevelTick()
             }
+        }
+    }
 
-            // Calculate levels and send to RustyBar and UI
-            let levels = RustyBarBridge.calculateAudioLevels(from: samples)
-            self.rustyBarBridge.sendAudioLevels(levels)
-            self.onAudioLevels?(levels)
-            
-            // Auto-stop on silence for wake word triggered recordings
-            if self.isWakeWordTriggered {
-                self.checkSilenceForAutoStop(samples: samples)
-            }
+    @MainActor
+    private func handleAudioLevelTick() {
+        // Get recent audio samples from recorder
+        let samples: [Float]
+        if useAudioKit {
+            samples = audioKitRecorder.getRecentSamples(count: 1600)
+        } else {
+            samples = audioRecorder.getRecentSamples(count: 1600)
+        }
+
+        // Calculate levels and send to Sinew and UI
+        let levels = SinewBridge.calculateAudioLevels(from: samples)
+        sinewBridge.sendAudioLevels(levels)
+        onAudioLevels?(levels)
+
+        // Auto-stop on silence for wake word triggered recordings
+        if isWakeWordTriggered {
+            checkSilenceForAutoStop(samples: samples)
         }
     }
     
@@ -321,8 +353,8 @@ final class DictationController: ObservableObject {
             audioSamples = audioRecorder.stopRecording()
         }
 
-        // Notify RustyBar of transcribing state
-        rustyBarBridge.sendState(.transcribing)
+        // Notify Sinew of transcribing state
+        sinewBridge.sendState(.transcribing)
 
         // Calculate recording duration
         let duration: TimeInterval
@@ -336,7 +368,7 @@ final class DictationController: ObservableObject {
         guard !audioSamples.isEmpty else {
             logWarning("No audio captured")
             stateManager.setIdle()
-            rustyBarBridge.sendState(.idle)
+            sinewBridge.sendState(.idle)
             return
         }
 
@@ -346,7 +378,7 @@ final class DictationController: ObservableObject {
             logInfo("Audio too short (\(audioSamples.count) samples, need \(minSamples)), ignoring")
             // Just go back to idle silently - no error, just not enough audio
             stateManager.setIdle()
-            rustyBarBridge.sendState(.idle)
+            sinewBridge.sendState(.idle)
             return
         }
 
@@ -364,7 +396,7 @@ final class DictationController: ObservableObject {
                 if !verificationResult.isMatch {
                     logInfo("Voice verification failed (similarity: \(String(format: "%.2f", verificationResult.similarity)))")
                     stateManager.setIdle()
-                    rustyBarBridge.sendState(.idle)
+                    sinewBridge.sendState(.idle)
                     // Optionally show brief feedback
                     // Could show "Voice not recognized" but keeping it silent for now
                     return
@@ -382,11 +414,11 @@ final class DictationController: ObservableObject {
             guard !rawText.isEmpty else {
                 logInfo("Empty transcription result")
                 stateManager.setIdle()
-                rustyBarBridge.sendState(.idle)
+                sinewBridge.sendState(.idle)
                 return
             }
 
-            let formattedText = textFormatter.format(rawText)
+            let formattedText = TextFormatter().format(rawText)
             logInfo("Formatted: '\(rawText)' → '\(formattedText)'")
 
             // Save to history
@@ -395,25 +427,25 @@ final class DictationController: ObservableObject {
 
             try textInserter.insert(formattedText)
             stateManager.setIdle()
-            rustyBarBridge.sendState(.idle)
+            sinewBridge.sendState(.idle)
         } catch let error as TranscriberError {
             logError("Transcription error: \(error)")
             switch error {
             case .timeout:
-                rustyBarBridge.sendState(.error(message: "Timed out"))
+                sinewBridge.sendState(.error(message: "Timed out"))
                 stateManager.setError("Transcription timed out")
             case .invalidAudioData:
                 // Audio too short or invalid - just go back to idle silently
                 logInfo("Audio too short for transcription")
                 stateManager.setIdle()
-                rustyBarBridge.sendState(.idle)
+                sinewBridge.sendState(.idle)
             default:
-                rustyBarBridge.sendState(.error(message: error.localizedDescription))
+                sinewBridge.sendState(.error(message: error.localizedDescription))
                 stateManager.setError(error.localizedDescription)
             }
         } catch {
             logError("Error during transcription: \(error)")
-            rustyBarBridge.sendState(.error(message: error.localizedDescription))
+            sinewBridge.sendState(.error(message: error.localizedDescription))
             stateManager.setError(error.localizedDescription)
         }
     }
@@ -446,6 +478,7 @@ enum DictationError: Error, LocalizedError {
     case accessibilityPermissionDenied
     case eventTapFailed
     case notInitialized
+    case cannotChangeModelWhileBusy
 
     var errorDescription: String? {
         switch self {
@@ -457,6 +490,8 @@ enum DictationError: Error, LocalizedError {
             return "Failed to create event tap for Globe key. Please check Accessibility permissions."
         case .notInitialized:
             return "Dictation controller not initialized"
+        case .cannotChangeModelWhileBusy:
+            return "Stop recording/transcribing before changing transcription model."
         }
     }
 }

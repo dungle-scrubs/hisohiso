@@ -1,25 +1,39 @@
 import Foundation
 
-/// Bridge to communicate with RustyBar's Hisohiso module via Unix socket
-final class RustyBarBridge {
-    static let shared = RustyBarBridge()
+/// Bridge to communicate with Sinew's external Hisohiso module via Unix socket IPC.
+final class SinewBridge: @unchecked Sendable {
+    static let shared = SinewBridge()
 
-    private let socketPath = "/tmp/hisohiso-rustybar.sock"
-    private let commandSocketPath = "/tmp/hisohiso-command.sock"
-    private let queue = DispatchQueue(label: "com.hisohiso.rustybar", qos: .utility)
+    private let moduleID = "hisohiso"
+    private let queue = DispatchQueue(label: "com.hisohiso.sinew", qos: .utility)
 
-    /// Whether RustyBar is available (socket exists)
+    /// Whether Sinew is available (socket exists)
     private(set) var isAvailable = false
 
-    /// Whether to use RustyBar for visualization
-    /// Stored in UserDefaults
-    var useRustyBarVisualization: Bool {
-        get { UserDefaults.standard.bool(forKey: "useRustyBarVisualization") }
-        set { UserDefaults.standard.set(newValue, forKey: "useRustyBarVisualization") }
+    /// Unix socket path for Sinew IPC.
+    private var socketPath: String {
+        let runtimeDir = ProcessInfo.processInfo.environment["XDG_RUNTIME_DIR"] ?? "/tmp"
+        return runtimeDir + "/sinew.sock"
     }
 
-    /// Whether to show the floating pill
-    /// Stored in UserDefaults
+    /// Whether to use Sinew for visualization.
+    /// Stored in UserDefaults with backward compatibility for legacy RustyBar key.
+    var useSinewVisualization: Bool {
+        get {
+            if let value = UserDefaults.standard.object(forKey: "useSinewVisualization") as? Bool {
+                return value
+            }
+            return UserDefaults.standard.object(forKey: "useRustyBarVisualization") as? Bool ?? true
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "useSinewVisualization")
+            // Keep legacy key in sync for migration safety.
+            UserDefaults.standard.set(newValue, forKey: "useRustyBarVisualization")
+        }
+    }
+
+    /// Whether to show the floating pill.
+    /// Stored in UserDefaults.
     var showFloatingPill: Bool {
         get { UserDefaults.standard.bool(forKey: "showFloatingPill") }
         set { UserDefaults.standard.set(newValue, forKey: "showFloatingPill") }
@@ -30,15 +44,26 @@ final class RustyBarBridge {
         showFloatingPill
     }
 
-    /// Should we send to RustyBar based on settings?
+    /// Should we send state updates to Sinew based on settings?
+    var shouldUseSinew: Bool {
+        isAvailable && useSinewVisualization
+    }
+
+    /// Backward-compatible alias for legacy callers.
+    var useRustyBarVisualization: Bool {
+        get { useSinewVisualization }
+        set { useSinewVisualization = newValue }
+    }
+
+    /// Backward-compatible alias for legacy callers.
     var shouldUseRustyBar: Bool {
-        isAvailable && useRustyBarVisualization
+        shouldUseSinew
     }
 
     private init() {
-        // Default: RustyBar on if available, pill off
-        if UserDefaults.standard.object(forKey: "useRustyBarVisualization") == nil {
-            UserDefaults.standard.set(true, forKey: "useRustyBarVisualization")
+        if UserDefaults.standard.object(forKey: "useSinewVisualization") == nil {
+            let legacy = UserDefaults.standard.object(forKey: "useRustyBarVisualization") as? Bool
+            UserDefaults.standard.set(legacy ?? true, forKey: "useSinewVisualization")
         }
         if UserDefaults.standard.object(forKey: "showFloatingPill") == nil {
             UserDefaults.standard.set(false, forKey: "showFloatingPill")
@@ -48,41 +73,37 @@ final class RustyBarBridge {
 
     // MARK: - Public API
 
-    /// Send current state to RustyBar
-    /// - Parameter state: The recording state
+    /// Send current state to Sinew.
+    /// - Parameter state: The recording state.
     func sendState(_ state: RecordingState) {
-        let stateStr: String
+        guard useSinewVisualization else { return }
+
         switch state {
         case .idle:
-            stateStr = "idle"
+            send("set \(moduleID) drawing=off")
         case .recording:
-            stateStr = "recording"
+            send("set \(moduleID) drawing=on label=● color=#ff5555")
         case .transcribing:
-            stateStr = "transcribing"
+            send("set \(moduleID) drawing=on label=◐ color=#f9e2af")
         case .error:
-            stateStr = "error"
+            send("set \(moduleID) drawing=on label=✗ color=#ff5555")
         }
-
-        send("state \(stateStr)")
     }
 
-    /// Send audio levels to RustyBar for waveform visualization
-    /// - Parameter levels: Array of 7 audio levels (0-100)
+    /// Sinew external modules do not expose a waveform API, so levels are ignored.
+    /// - Parameter levels: Array of audio levels (unused).
     func sendAudioLevels(_ levels: [UInt8]) {
-        guard levels.count >= 7 else { return }
-
-        let levelsStr = levels.prefix(7).map { String($0) }.joined(separator: ",")
-        send("levels \(levelsStr)")
+        _ = levels
     }
 
-    /// Check if RustyBar socket is available
+    /// Check if Sinew socket is available.
     func checkAvailability() {
         queue.async { [weak self] in
             guard let self else { return }
             self.isAvailable = FileManager.default.fileExists(atPath: self.socketPath)
 
             if self.isAvailable {
-                logDebug("RustyBar socket available at \(self.socketPath)")
+                logDebug("Sinew socket available at \(self.socketPath)")
             }
         }
     }
@@ -91,11 +112,16 @@ final class RustyBarBridge {
 
     private func send(_ command: String) {
         queue.async { [weak self] in
-            guard let self, self.isAvailable else { return }
+            guard let self else { return }
+
+            if !self.isAvailable {
+                self.isAvailable = FileManager.default.fileExists(atPath: self.socketPath)
+            }
+            guard self.isAvailable else { return }
 
             let socket = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
             guard socket >= 0 else {
-                logDebug("RustyBar: Failed to create socket")
+                logDebug("Sinew: Failed to create socket")
                 return
             }
             defer { close(socket) }
@@ -115,7 +141,7 @@ final class RustyBarBridge {
             }
 
             guard connectResult == 0 else {
-                logDebug("RustyBar: Failed to connect")
+                logDebug("Sinew: Failed to connect")
                 self.isAvailable = false
                 return
             }
@@ -125,17 +151,20 @@ final class RustyBarBridge {
                 _ = Darwin.write(socket, ptr, strlen(ptr))
             }
 
-            logDebug("RustyBar: sent '\(command)'")
+            logDebug("Sinew: sent '\(command)'")
         }
     }
 }
 
+/// Backward-compatible alias while callers migrate from RustyBar naming.
+typealias RustyBarBridge = SinewBridge
+
 // MARK: - Audio Level Calculator
 
-extension RustyBarBridge {
-    /// Calculate waveform levels from audio samples
-    /// - Parameter samples: Raw audio samples (16kHz mono)
-    /// - Returns: Array of 7 normalized levels (0-100)
+extension SinewBridge {
+    /// Calculate waveform levels from audio samples.
+    /// - Parameter samples: Raw audio samples (16kHz mono).
+    /// - Returns: Array of 7 normalized levels (0-100).
     static func calculateAudioLevels(from samples: [Float]) -> [UInt8] {
         guard !samples.isEmpty else {
             return [UInt8](repeating: 0, count: 7)
@@ -153,10 +182,10 @@ extension RustyBarBridge {
             if start < samples.count {
                 let chunk = samples[start ..< end]
 
-                // Calculate RMS for this chunk
+                // Calculate RMS for this chunk.
                 let rms = sqrt(chunk.map { $0 * $0 }.reduce(0, +) / Float(chunk.count))
 
-                // Normalize to 0-100 (raw values, UI will amplify as needed)
+                // Normalize to 0-100 (raw values, UI will amplify as needed).
                 let normalized = min(100, max(0, Int(rms * 300)))
                 levels.append(UInt8(normalized))
             } else {

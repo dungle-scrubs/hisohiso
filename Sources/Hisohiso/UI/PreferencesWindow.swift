@@ -150,9 +150,9 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
         view.addSubview(separator)
         y -= 20
 
-        // RustyBar section
-        let rustyBarLabel = createSectionLabel("Recording Indicator", y: y)
-        view.addSubview(rustyBarLabel)
+        // Sinew section
+        let sinewLabel = createSectionLabel("Recording Indicator", y: y)
+        view.addSubview(sinewLabel)
         y -= 30
 
         floatingPillToggle = NSButton(checkboxWithTitle: "Show floating pill", target: self, action: #selector(floatingPillToggleChanged))
@@ -160,16 +160,16 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
         view.addSubview(floatingPillToggle)
         y -= 26
 
-        rustyBarToggle = NSButton(checkboxWithTitle: "Show in RustyBar", target: self, action: #selector(rustyBarToggleChanged))
+        rustyBarToggle = NSButton(checkboxWithTitle: "Show in Sinew", target: self, action: #selector(rustyBarToggleChanged))
         rustyBarToggle.frame = NSRect(x: 20, y: y, width: 400, height: 20)
         view.addSubview(rustyBarToggle)
         y -= 22
 
-        let rustyBarStatus = NSTextField(labelWithString: RustyBarBridge.shared.isAvailable ? "✓ RustyBar detected" : "RustyBar not running")
-        rustyBarStatus.frame = NSRect(x: 40, y: y, width: 200, height: 16)
-        rustyBarStatus.font = .systemFont(ofSize: 11)
-        rustyBarStatus.textColor = RustyBarBridge.shared.isAvailable ? .systemGreen : .secondaryLabelColor
-        view.addSubview(rustyBarStatus)
+        let sinewStatus = NSTextField(labelWithString: SinewBridge.shared.isAvailable ? "✓ Sinew detected" : "Sinew not running")
+        sinewStatus.frame = NSRect(x: 40, y: y, width: 200, height: 16)
+        sinewStatus.font = .systemFont(ofSize: 11)
+        sinewStatus.textColor = SinewBridge.shared.isAvailable ? .systemGreen : .secondaryLabelColor
+        view.addSubview(sinewStatus)
         y -= 22
 
         let indicatorHint = NSTextField(wrappingLabelWithString: "You can enable both to see recording status in multiple places.")
@@ -182,7 +182,7 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
     }
 
     @objc private func floatingPillToggleChanged() {
-        RustyBarBridge.shared.showFloatingPill = (floatingPillToggle.state == .on)
+        SinewBridge.shared.showFloatingPill = (floatingPillToggle.state == .on)
         logInfo("Floating pill toggled: \(floatingPillToggle.state == .on)")
     }
 
@@ -213,13 +213,13 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
         guard let selectedItem = microphonePopup.selectedItem,
               let device = selectedItem.representedObject as? AudioInputDevice else { return }
 
-        // Save to UserDefaults (AudioRecorder will pick it up)
         if device.uid == AudioInputDevice.systemDefault.uid {
             UserDefaults.standard.removeObject(forKey: "selectedAudioDeviceUID")
         } else {
             UserDefaults.standard.set(device.uid, forKey: "selectedAudioDeviceUID")
         }
 
+        NotificationCenter.default.post(name: .audioInputDeviceChanged, object: nil)
         logInfo("Microphone preference changed to: \(device.name)")
     }
 
@@ -591,7 +591,6 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
     @objc private func wakeWordToggleChanged() {
         UserDefaults.standard.set(wakeWordToggle.state == .on, forKey: "wakeWordEnabled")
         updateWakeWordStatus()
-        // The WakeWordManager will observe this change via its @Published property
         NotificationCenter.default.post(name: .wakeWordSettingsChanged, object: nil)
     }
 
@@ -619,9 +618,9 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
         // General
         audioFeedbackToggle.state = defaults.object(forKey: "audioFeedbackEnabled") as? Bool ?? true ? .on : .off
         launchAtLoginToggle.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        floatingPillToggle.state = RustyBarBridge.shared.showFloatingPill ? .on : .off
-        rustyBarToggle.state = RustyBarBridge.shared.useRustyBarVisualization ? .on : .off
-        rustyBarToggle.isEnabled = RustyBarBridge.shared.isAvailable
+        floatingPillToggle.state = SinewBridge.shared.showFloatingPill ? .on : .off
+        rustyBarToggle.state = SinewBridge.shared.useSinewVisualization ? .on : .off
+        rustyBarToggle.isEnabled = SinewBridge.shared.isAvailable
         useAudioKitToggle.state = defaults.bool(forKey: "useAudioKit") ? .on : .off
 
         // Model
@@ -752,14 +751,17 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
     }
 
     @objc private func rustyBarToggleChanged() {
-        RustyBarBridge.shared.useRustyBarVisualization = rustyBarToggle.state == .on
-        logInfo("RustyBar visualization: \(rustyBarToggle.state == .on)")
+        SinewBridge.shared.useSinewVisualization = rustyBarToggle.state == .on
+        logInfo("Sinew visualization: \(rustyBarToggle.state == .on)")
     }
 
     @objc private func modelChanged() {
         guard let model = getSelectedModel() else { return }
-        UserDefaults.standard.set(model.rawValue, forKey: "selectedModel")
+
         modelManager.selectedModel = model
+        modelManager.saveSelectedModel()
+        NotificationCenter.default.post(name: .modelSelectionChanged, object: nil)
+
         logInfo("Model changed to: \(model.displayName)")
         updateModelUI()
     }
@@ -774,17 +776,16 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
         statusLabel.textColor = .secondaryLabelColor
 
         Task { @MainActor in
-            do {
-                let progressTask = Task {
-                    while modelManager.isDownloading {
-                        progressIndicator.doubleValue = modelManager.downloadProgress
-                        try await Task.sleep(for: .milliseconds(100))
-                    }
+            let progressTask = Task {
+                while !Task.isCancelled {
+                    progressIndicator.doubleValue = modelManager.downloadProgress
+                    try await Task.sleep(for: .milliseconds(100))
                 }
+            }
+            defer { progressTask.cancel() }
 
+            do {
                 try await modelManager.downloadModel(model)
-                progressTask.cancel()
-
                 statusLabel.stringValue = "✓ Download complete!"
                 statusLabel.textColor = .systemGreen
             } catch {
@@ -974,4 +975,6 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
 
 extension Notification.Name {
     static let wakeWordSettingsChanged = Notification.Name("wakeWordSettingsChanged")
+    static let modelSelectionChanged = Notification.Name("modelSelectionChanged")
+    static let audioInputDeviceChanged = Notification.Name("audioInputDeviceChanged")
 }

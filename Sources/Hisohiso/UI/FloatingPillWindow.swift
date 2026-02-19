@@ -10,11 +10,11 @@ private class ClickableView: NSView {
     }
 }
 
-/// Animated waveform view using Core Animation - matches RustyBar exactly
+/// Animated waveform view using Core Animation tuned to match Sinew visuals
 private class WaveformView: NSView {
     private var barLayers: [CALayer] = []
     private var barsCreated = false
-    // Match RustyBar: bar_width=3, bar_gap=2, max_height=20, min_height=4
+    // Match Sinew config defaults: bar_width=3, bar_gap=2, max_height=20, min_height=4
     private let barCount = 7
     private let barWidth: CGFloat = 3
     private let barSpacing: CGFloat = 2
@@ -43,7 +43,7 @@ private class WaveformView: NSView {
         for i in 0 ..< barCount {
             let bar = CALayer()
             bar.backgroundColor = NSColor.white.withAlphaComponent(0.9).cgColor
-            bar.cornerRadius = 1 // Match RustyBar: rounded(px(1.0))
+            bar.cornerRadius = 1 // Match Sinew: rounded(px(1.0))
 
             let x = startX + CGFloat(i) * (barWidth + barSpacing)
             // All bars start at same minBarHeight
@@ -69,7 +69,7 @@ private class WaveformView: NSView {
 
         for (i, bar) in barLayers.enumerated() {
             let rawLevel = i < levels.count ? CGFloat(levels[i]) : 0
-            // Match RustyBar: amplify 5x, cap at 100
+            // Match Sinew: amplify 5x, cap at 100
             let level = min(rawLevel * 5.0, 100.0) / 100.0
             let height = minBarHeight + (maxBarHeight - minBarHeight) * level
             let y = (bounds.height - height) / 2

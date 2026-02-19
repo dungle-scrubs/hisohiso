@@ -4,6 +4,7 @@ import Foundation
 
 /// Speaker verification using CoreML embedding model (Resemblyzer)
 /// Compares voice embeddings to determine if the speaker matches the enrolled user
+@MainActor
 final class VoiceVerifier {
     /// Shared instance
     static let shared = VoiceVerifier()
@@ -193,12 +194,20 @@ final class VoiceVerifier {
             var realPart = [Float](repeating: 0, count: nFft / 2)
             var imagPart = [Float](repeating: 0, count: nFft / 2)
 
-            windowedFrame.withUnsafeBufferPointer { ptr in
-                var splitComplex = DSPSplitComplex(realp: &realPart, imagp: &imagPart)
-                ptr.baseAddress!.withMemoryRebound(to: DSPComplex.self, capacity: nFft / 2) { complexPtr in
-                    vDSP_ctoz(complexPtr, 2, &splitComplex, 1, vDSP_Length(nFft / 2))
+            realPart.withUnsafeMutableBufferPointer { realBuffer in
+                imagPart.withUnsafeMutableBufferPointer { imagBuffer in
+                    guard let realBase = realBuffer.baseAddress,
+                          let imagBase = imagBuffer.baseAddress else { return }
+
+                    var splitComplex = DSPSplitComplex(realp: realBase, imagp: imagBase)
+                    windowedFrame.withUnsafeBufferPointer { ptr in
+                        guard let base = ptr.baseAddress else { return }
+                        base.withMemoryRebound(to: DSPComplex.self, capacity: nFft / 2) { complexPtr in
+                            vDSP_ctoz(complexPtr, 2, &splitComplex, 1, vDSP_Length(nFft / 2))
+                        }
+                    }
+                    vDSP_fft_zrip(fftSetup, &splitComplex, 1, log2n, FFTDirection(FFT_FORWARD))
                 }
-                vDSP_fft_zrip(fftSetup, &splitComplex, 1, log2n, FFTDirection(FFT_FORWARD))
             }
 
             // Compute power spectrum
@@ -334,6 +343,7 @@ final class VoiceVerifier {
     /// Clear enrolled voice
     func clearEnrollment() {
         enrolledEmbedding = nil
+        _ = KeychainManager.shared.deleteData(forKey: embeddingKeychainKey)
         try? FileManager.default.removeItem(at: embeddingFileURL)
         logInfo("VoiceVerifier: Enrollment cleared")
     }
@@ -409,8 +419,11 @@ final class VoiceVerifier {
     }
 
     // MARK: - Persistence
-    
-    /// Use file storage instead of Keychain to avoid password prompts during dev
+
+    /// Keychain key for persisted voice embedding.
+    private let embeddingKeychainKey = "voice-embedding-v1"
+
+    /// Legacy file path kept only for one-time migration.
     private var embeddingFileURL: URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let dir = appSupport.appendingPathComponent("Hisohiso")
@@ -422,30 +435,57 @@ final class VoiceVerifier {
         guard let embedding = enrolledEmbedding else { return }
 
         let data = embedding.withUnsafeBytes { Data($0) }
-        do {
-            try data.write(to: embeddingFileURL)
-            logDebug("VoiceVerifier: Saved embedding to file")
-        } catch {
-            logError("VoiceVerifier: Failed to save embedding: \(error)")
+        switch KeychainManager.shared.setData(data, forKey: embeddingKeychainKey) {
+        case .success:
+            logDebug("VoiceVerifier: Saved embedding to Keychain")
+            // Cleanup legacy file if present.
+            try? FileManager.default.removeItem(at: embeddingFileURL)
+        case .failure(let error):
+            logError("VoiceVerifier: Failed to save embedding to Keychain: \(error.localizedDescription)")
         }
     }
 
     private func loadEnrolledEmbedding() {
-        guard let data = try? Data(contentsOf: embeddingFileURL) else {
-            logDebug("VoiceVerifier: No enrolled embedding found")
+        // Preferred: Keychain
+        if let data = KeychainManager.shared.getData(forKey: embeddingKeychainKey),
+           let embedding = decodeEmbedding(from: data)
+        {
+            enrolledEmbedding = embedding
+            logInfo("VoiceVerifier: Loaded enrolled embedding from Keychain")
             return
         }
 
-        let count = data.count / MemoryLayout<Float>.size
-        guard count == Self.embeddingDimension else {
+        // Legacy migration path: file -> Keychain
+        if let data = try? Data(contentsOf: embeddingFileURL),
+           let embedding = decodeEmbedding(from: data)
+        {
+            enrolledEmbedding = embedding
+            logInfo("VoiceVerifier: Loaded enrolled embedding from legacy file, migrating to Keychain")
+            switch KeychainManager.shared.setData(data, forKey: embeddingKeychainKey) {
+            case .success:
+                try? FileManager.default.removeItem(at: embeddingFileURL)
+            case .failure(let error):
+                logWarning("VoiceVerifier: Failed to migrate embedding to Keychain: \(error.localizedDescription)")
+            }
+            return
+        }
+
+        logDebug("VoiceVerifier: No enrolled embedding found")
+    }
+
+    private func decodeEmbedding(from data: Data) -> [Float]? {
+        let floatSize = MemoryLayout<Float>.size
+        guard data.count == Self.embeddingDimension * floatSize else {
+            let count = data.count / floatSize
             logWarning("VoiceVerifier: Invalid embedding size: \(count), expected \(Self.embeddingDimension)")
-            return
+            return nil
         }
 
-        var embedding = [Float](repeating: 0, count: count)
-        _ = data.copyBytes(to: UnsafeMutableBufferPointer(start: &embedding, count: count))
-        enrolledEmbedding = embedding
-        logInfo("VoiceVerifier: Loaded enrolled embedding from file")
+        var embedding = [Float](repeating: 0, count: Self.embeddingDimension)
+        _ = embedding.withUnsafeMutableBytes { bytes in
+            data.copyBytes(to: bytes)
+        }
+        return embedding
     }
 }
 

@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 /// Manages secure storage of API keys and sensitive data in macOS Keychain
-final class KeychainManager {
+final class KeychainManager: @unchecked Sendable {
     static let shared = KeychainManager()
 
     private let service = "com.hisohiso.app"

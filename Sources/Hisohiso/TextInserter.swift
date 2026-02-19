@@ -66,26 +66,69 @@ final class TextInserter {
         }
     }
 
-    /// Insert text using the clipboard and Cmd+V
+    /// Insert text using the clipboard and Cmd+V.
+    /// Preserves all pasteboard item types and restores only if clipboard has not changed.
     private func insertViaPaste(_ text: String) {
-        // Save current clipboard content
         let pasteboard = NSPasteboard.general
-        let previousContents = pasteboard.string(forType: .string)
+        let snapshot = Self.snapshotPasteboard(pasteboard)
 
-        // Set clipboard to our text
         pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        guard pasteboard.setString(text, forType: .string) else {
+            logWarning("Failed to set pasteboard string; falling back to key events")
+            insertViaKeyEvents(text)
+            return
+        }
+
+        let expectedChangeCount = pasteboard.changeCount
 
         // Simulate Cmd+V
         simulateCommandV()
 
-        // Restore previous clipboard after a delay
-        let previous = previousContents
+        // Restore clipboard after a delay, but only if user/app did not change it.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            if let previous {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(previous, forType: .string)
+            let currentPasteboard = NSPasteboard.general
+            guard currentPasteboard.changeCount == expectedChangeCount else {
+                return
             }
+            Self.restorePasteboard(snapshot, to: currentPasteboard)
+        }
+    }
+
+    /// Snapshot all pasteboard items and data representations.
+    /// - Parameter pasteboard: Pasteboard to snapshot.
+    /// - Returns: Serialized items keyed by pasteboard type.
+    private static func snapshotPasteboard(_ pasteboard: NSPasteboard) -> [[NSPasteboard.PasteboardType: Data]] {
+        guard let items = pasteboard.pasteboardItems else { return [] }
+
+        return items.map { item in
+            var snapshot = [NSPasteboard.PasteboardType: Data]()
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    snapshot[type] = data
+                }
+            }
+            return snapshot
+        }
+    }
+
+    /// Restore pasteboard from a previous snapshot.
+    /// - Parameters:
+    ///   - snapshot: Snapshot captured by `snapshotPasteboard`.
+    ///   - pasteboard: Pasteboard to restore.
+    private static func restorePasteboard(_ snapshot: [[NSPasteboard.PasteboardType: Data]], to pasteboard: NSPasteboard) {
+        pasteboard.clearContents()
+        guard !snapshot.isEmpty else { return }
+
+        let items: [NSPasteboardItem] = snapshot.compactMap { itemData in
+            let item = NSPasteboardItem()
+            for (type, data) in itemData {
+                item.setData(data, forType: type)
+            }
+            return item.types.isEmpty ? nil : item
+        }
+
+        if !items.isEmpty {
+            _ = pasteboard.writeObjects(items)
         }
     }
 

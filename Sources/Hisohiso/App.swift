@@ -30,6 +30,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var preferencesWindow: PreferencesWindow?
     private var historyPalette: HistoryPaletteWindow?
     private var historyHotkeyMonitor: HistoryHotkeyMonitor?
+    private var wakeWordSettingsObserver: NSObjectProtocol?
+    private var modelSelectionObserver: NSObjectProtocol?
+    private var microphoneSelectionObserver: NSObjectProtocol?
+    private var hasPendingModelReload = false
 
     /// UserDefaults key for tracking first launch
     private let hasCompletedOnboardingKey = "hasCompletedOnboarding"
@@ -38,7 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         logInfo("Hisohiso starting...")
         logInfo("Log file: \(Logger.shared.logFilePath)")
 
-        // Handle CLI arguments (e.g., --history from RustyBar click)
+        // Handle CLI arguments (e.g., --history from Sinew click)
         handleLaunchArguments()
 
         modelManager = ModelManager()
@@ -46,6 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupFloatingPill()
         setupHistoryPalette()
         setupHistoryHotkey()
+        setupSettingsObservers()
 
         // Check if first launch
         if !UserDefaults.standard.bool(forKey: hasCompletedOnboardingKey) {
@@ -59,6 +64,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dictationController?.shutdown()
         historyHotkeyMonitor?.stop()
         hotkeyManager?.stop()
+
+        if let observer = wakeWordSettingsObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = modelSelectionObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = microphoneSelectionObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+
         logInfo("Hisohiso shutting down")
     }
 
@@ -93,6 +109,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.toggleHistoryPalette()
             }
         }
+    }
+
+    private func setupSettingsObservers() {
+        let center = NotificationCenter.default
+
+        modelSelectionObserver = center.addObserver(
+            forName: .modelSelectionChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                do {
+                    try await self.dictationController?.reloadSelectedModel()
+                    self.hasPendingModelReload = false
+                } catch let dictationError as DictationError {
+                    if case .cannotChangeModelWhileBusy = dictationError {
+                        self.hasPendingModelReload = true
+                        logWarning("Model change queued until dictation returns to idle")
+                    } else {
+                        logError("Failed to reload transcription model: \(dictationError)")
+                    }
+                } catch {
+                    logError("Failed to reload transcription model: \(error)")
+                }
+            }
+        }
+
+        microphoneSelectionObserver = center.addObserver(
+            forName: .audioInputDeviceChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.applySelectedMicrophonePreference()
+            }
+        }
+    }
+
+    private func applySelectedMicrophonePreference() {
+        let selectedUID = UserDefaults.standard.string(forKey: "selectedAudioDeviceUID")
+        let selectedDevice = AudioRecorder.availableInputDevices().first {
+            $0.uid == selectedUID
+        } ?? .systemDefault
+
+        dictationController?.audioRecorder.setInputDevice(selectedDevice)
     }
 
     // MARK: - Setup
@@ -193,6 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyManager = HotkeyManager()
 
         dictationController = DictationController(modelManager: modelManager, hotkeyManager: hotkeyManager)
+        applySelectedMicrophonePreference()
 
         // Observe state changes to update floating pill
         if let controller = dictationController {
@@ -202,6 +265,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.updateFloatingPill(for: state)
                     // Resume wake word listening and monitoring when idle
                     if case .idle = state {
+                        if self?.hasPendingModelReload == true {
+                            Task { @MainActor [weak self] in
+                                guard let self else { return }
+                                do {
+                                    try await self.dictationController?.reloadSelectedModel()
+                                    self.hasPendingModelReload = false
+                                    logInfo("Applied pending model change")
+                                } catch {
+                                    logError("Failed to apply pending model change: \(error)")
+                                }
+                            }
+                        }
+
                         if self?.wakeWordManager?.isEnabled == true {
                             self?.dictationController?.audioRecorder.resumeMonitoring()
                             self?.wakeWordManager?.resumeListening()
@@ -274,14 +350,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         
         // Listen for settings changes
-        NotificationCenter.default.addObserver(
+        if let observer = wakeWordSettingsObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+
+        wakeWordSettingsObserver = NotificationCenter.default.addObserver(
             forName: .wakeWordSettingsChanged,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                if self.wakeWordManager?.isEnabled == true {
+
+                let isEnabled = UserDefaults.standard.bool(forKey: "wakeWordEnabled")
+                self.wakeWordManager?.isEnabled = isEnabled
+
+                if isEnabled {
                     do {
                         try await self.wakeWordManager?.initialize()
                         try self.dictationController?.audioRecorder.startMonitoring()
@@ -301,9 +385,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         logInfo("updateFloatingPill called with state: \(state)")
 
         // Check if pill should be shown
-        let showPill = RustyBarBridge.shared.shouldShowFloatingPill
+        let showPill = SinewBridge.shared.shouldShowFloatingPill
 
-        // Always show pill for errors (RustyBar can't show error details)
+        // Always show pill for errors (Sinew module does not render detailed error text)
         let isError = { if case .error = state { return true } else { return false } }()
 
         if !showPill && !isError {
@@ -361,19 +445,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Transcription model submenu
         let modelItem = NSMenuItem(title: "Transcription Model", action: nil, keyEquivalent: "")
         let modelMenu = NSMenu()
-        let currentModel = UserDefaults.standard.string(forKey: "selectedModel") ?? "parakeet-v2"
-        let models = [
-            ("Parakeet v2 (English)", "parakeet-v2"),
-            ("Whisper Large v3 Turbo", "large-v3-turbo"),
-            ("Whisper Small (English)", "small-en")
-        ]
-        for (name, id) in models {
-            let item = NSMenuItem(title: name, action: #selector(selectModel(_:)), keyEquivalent: "")
+        let currentModel = modelManager?.selectedModel ?? .defaultModel
+
+        for model in TranscriptionModel.allCases {
+            let item = NSMenuItem(title: model.displayName, action: #selector(selectModel(_:)), keyEquivalent: "")
             item.target = self
-            item.representedObject = id
-            item.state = (id == currentModel) ? .on : .off
+            item.representedObject = model.rawValue
+            item.state = (model == currentModel) ? .on : .off
             modelMenu.addItem(item)
         }
+
         modelItem.submenu = modelMenu
         menu.addItem(modelItem)
 
@@ -396,10 +477,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func selectModel(_ sender: NSMenuItem) {
-        guard let modelId = sender.representedObject as? String else { return }
-        UserDefaults.standard.set(modelId, forKey: "selectedModel")
-        logInfo("Model selected: \(modelId)")
-        // Reinitialize transcriber with new model would go here
+        guard let rawValue = sender.representedObject as? String,
+              let model = TranscriptionModel(rawValue: rawValue),
+              let modelManager else {
+            return
+        }
+
+        modelManager.selectedModel = model
+        modelManager.saveSelectedModel()
+        NotificationCenter.default.post(name: .modelSelectionChanged, object: nil)
+        logInfo("Model selected: \(model.rawValue)")
     }
     
     @objc private func testUI() {
