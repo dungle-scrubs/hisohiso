@@ -31,8 +31,9 @@ format:
 
 # Setup development environment
 setup:
-	brew install swiftlint swiftformat pre-commit
+	brew install swiftlint swiftformat pre-commit trufflehog
 	pre-commit install
+	pre-commit install --hook-type pre-push
 
 # Open in Xcode
 xcode:
