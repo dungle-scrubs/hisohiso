@@ -125,12 +125,16 @@ final class AudioRecorder {
 
             guard status == noErr, bufferListSize > 0 else { continue }
 
-            let bufferListPtr = UnsafeMutablePointer<AudioBufferList>.allocate(capacity: Int(bufferListSize))
-            defer { bufferListPtr.deallocate() }
+            let rawBuffer = UnsafeMutableRawPointer.allocate(
+                byteCount: Int(bufferListSize),
+                alignment: MemoryLayout<AudioBufferList>.alignment
+            )
+            defer { rawBuffer.deallocate() }
 
-            status = AudioObjectGetPropertyData(deviceID, &inputChannelsAddress, 0, nil, &bufferListSize, bufferListPtr)
+            status = AudioObjectGetPropertyData(deviceID, &inputChannelsAddress, 0, nil, &bufferListSize, rawBuffer)
             guard status == noErr else { continue }
 
+            let bufferListPtr = rawBuffer.assumingMemoryBound(to: AudioBufferList.self)
             let bufferList = UnsafeMutableAudioBufferListPointer(bufferListPtr)
             let inputChannels = bufferList.reduce(0) { $0 + Int($1.mNumberChannels) }
 
@@ -248,9 +252,20 @@ final class AudioRecorder {
     /// Start recording audio
     /// - Throws: AudioRecorderError if recording fails to start
     func startRecording() throws {
+        logInfo("AudioRecorder.startRecording() called (isRecording: \(isRecording), isMonitoring: \(isMonitoring))")
+        
         guard !isRecording else {
-            logWarning("Already recording")
+            logWarning("Already recording, returning early")
             return
+        }
+
+        // Stop monitoring if active (can't have two taps on same node)
+        if isMonitoring {
+            logInfo("Stopping monitoring tap before recording...")
+            engine.inputNode.removeTap(onBus: 0)
+            engine.stop()
+            // Keep isMonitoring true so we resume after recording
+            logInfo("Monitoring paused for recording")
         }
 
         // Apply selected device before getting input format

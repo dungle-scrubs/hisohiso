@@ -249,25 +249,36 @@ actor Transcriber {
     /// - Parameter audioSamples: Audio samples at 16kHz mono
     /// - Returns: Transcribed text
     func transcribeWithCloud(_ audioSamples: [Float]) async throws -> String {
+        var attemptedProvider = false
+        var lastError: Error?
+
         // Try preferred provider first
         let preferredType = cloudFallbackSettings.preferredProvider
         if let provider = cloudProviders[preferredType], provider.isConfigured {
+            attemptedProvider = true
             logInfo("Transcribing with cloud provider: \(provider.displayName)")
             do {
                 return try await provider.transcribe(audioSamples)
             } catch {
+                lastError = error
                 logWarning("Preferred cloud provider failed: \(error.localizedDescription)")
             }
         }
 
         // Try other configured providers
         for (type, provider) in cloudProviders where type != preferredType && provider.isConfigured {
+            attemptedProvider = true
             logInfo("Trying fallback cloud provider: \(provider.displayName)")
             do {
                 return try await provider.transcribe(audioSamples)
             } catch {
+                lastError = error
                 logWarning("Fallback cloud provider failed: \(error.localizedDescription)")
             }
+        }
+
+        if attemptedProvider, let lastError {
+            throw lastError
         }
 
         throw CloudTranscriptionError.notConfigured

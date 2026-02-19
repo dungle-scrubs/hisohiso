@@ -76,6 +76,10 @@ final class ModelManager: ObservableObject {
 
         isDownloading = true
         downloadProgress = 0
+        defer {
+            isDownloading = false
+            downloadProgress = 0
+        }
 
         logInfo("Starting download of model: \(model.rawValue)")
 
@@ -92,9 +96,6 @@ final class ModelManager: ObservableObject {
             logError("Model download failed: \(error)")
             throw error
         }
-
-        isDownloading = false
-        downloadProgress = 0
     }
 
     private func downloadWhisperModel(_ model: TranscriptionModel) async throws {
