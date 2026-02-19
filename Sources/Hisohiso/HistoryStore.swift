@@ -43,23 +43,37 @@ final class TranscriptionRecord {
 final class HistoryStore {
     static let shared = HistoryStore()
 
-    private var container: ModelContainer?
-    private var context: ModelContext?
+    private static let schema = Schema([TranscriptionRecord.self])
 
-    private init() {
+    private let container: ModelContainer?
+    private let context: ModelContext?
+
+    /// Creates a HistoryStore.
+    /// - Parameters:
+    ///   - inMemory: Whether to store data in memory only.
+    ///   - modelName: SwiftData model container name.
+    private init(inMemory: Bool = false, modelName: String = "Hisohiso") {
         do {
-            let schema = Schema([TranscriptionRecord.self])
             let config = ModelConfiguration(
-                "Hisohiso",
-                schema: schema,
-                isStoredInMemoryOnly: false
+                modelName,
+                schema: Self.schema,
+                isStoredInMemoryOnly: inMemory
             )
-            container = try ModelContainer(for: schema, configurations: [config])
-            context = container?.mainContext
-            logInfo("HistoryStore initialized")
+            let container = try ModelContainer(for: Self.schema, configurations: [config])
+            self.container = container
+            context = container.mainContext
+            logInfo("HistoryStore initialized (inMemory: \(inMemory))")
         } catch {
+            container = nil
+            context = nil
             logError("Failed to initialize HistoryStore: \(error)")
         }
+    }
+
+    /// Creates an isolated in-memory store for unit tests.
+    /// - Returns: A new HistoryStore backed by in-memory SwiftData.
+    static func makeInMemoryForTesting() -> HistoryStore {
+        HistoryStore(inMemory: true, modelName: "HisohisoTests-\(UUID().uuidString)")
     }
 
     // MARK: - CRUD Operations

@@ -6,8 +6,8 @@ final class HistoryStoreTests: XCTestCase {
     private var store: HistoryStore!
 
     override func setUp() async throws {
-        store = HistoryStore.shared
-        // Clear existing data for clean tests
+        // Use isolated in-memory storage to avoid touching user history.
+        store = HistoryStore.makeInMemoryForTesting()
         store.deleteAll()
     }
 

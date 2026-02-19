@@ -38,7 +38,7 @@ final class HistoryHotkeyMonitor {
             options: .defaultTap,
             eventsOfInterest: CGEventMask(eventMask),
             callback: { _, type, event, refcon -> Unmanaged<CGEvent>? in
-                guard let refcon else { return Unmanaged.passRetained(event) }
+                guard let refcon else { return Unmanaged.passUnretained(event) }
 
                 let monitor = Unmanaged<HistoryHotkeyMonitor>.fromOpaque(refcon).takeUnretainedValue()
 
@@ -46,7 +46,7 @@ final class HistoryHotkeyMonitor {
                     if let tap = monitor.eventTap {
                         CGEvent.tapEnable(tap: tap, enable: true)
                     }
-                    return Unmanaged.passRetained(event)
+                    return Unmanaged.passUnretained(event)
                 }
 
                 if monitor.handleKeyDown(event) {
@@ -54,7 +54,7 @@ final class HistoryHotkeyMonitor {
                     return nil
                 }
 
-                return Unmanaged.passRetained(event)
+                return Unmanaged.passUnretained(event)
             },
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         )
