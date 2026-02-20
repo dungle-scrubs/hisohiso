@@ -10,6 +10,7 @@ final class OnboardingWindow: NSWindow {
     private var launchToggle: NSButton!
     private var continueButton: NSButton!
     private var refreshTimer: Timer?
+    private let supportsLaunchAtLogin = Bundle.main.bundleURL.pathExtension == "app"
 
     init(onComplete: @escaping () -> Void) {
         self.onComplete = onComplete
@@ -106,9 +107,13 @@ final class OnboardingWindow: NSWindow {
         contentView.addSubview(micButton)
         
         // Launch at login
-        launchToggle = NSButton(checkboxWithTitle: "Launch at Login", target: nil, action: nil)
-        launchToggle.state = .on
-        launchToggle.frame = NSRect(x: 30, y: 50, width: 200, height: 20)
+        let launchTitle = supportsLaunchAtLogin
+            ? "Launch at Login"
+            : "Launch at Login (app bundle only)"
+        launchToggle = NSButton(checkboxWithTitle: launchTitle, target: nil, action: nil)
+        launchToggle.state = supportsLaunchAtLogin ? .on : .off
+        launchToggle.isEnabled = supportsLaunchAtLogin
+        launchToggle.frame = NSRect(x: 30, y: 50, width: 320, height: 20)
         contentView.addSubview(launchToggle)
         
         // Continue button
@@ -155,11 +160,15 @@ final class OnboardingWindow: NSWindow {
     
     @objc private func finishOnboarding() {
         refreshTimer?.invalidate()
-        
-        if launchToggle.state == .on {
-            try? SMAppService.mainApp.register()
+
+        if supportsLaunchAtLogin && launchToggle.state == .on {
+            do {
+                try SMAppService.mainApp.register()
+            } catch {
+                logError("Failed to enable launch at login during onboarding: \(error)")
+            }
         }
-        
+
         close()
         onComplete()
     }
