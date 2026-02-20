@@ -11,6 +11,7 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
     private var audioFeedbackToggle: NSButton!
     private var launchAtLoginToggle: NSButton!
     private var rustyBarToggle: NSButton!
+    private let supportsLaunchAtLogin = Bundle.main.bundleURL.pathExtension == "app"
     private var floatingPillToggle: NSButton!
     private var microphonePopup: NSPopUpButton!
     private var useAudioKitToggle: NSButton!
@@ -139,8 +140,12 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
         y -= 30
 
         // Launch at login toggle
-        launchAtLoginToggle = NSButton(checkboxWithTitle: "Launch at login", target: self, action: #selector(launchAtLoginChanged))
-        launchAtLoginToggle.frame = NSRect(x: 20, y: y, width: 400, height: 20)
+        let launchAtLoginTitle = supportsLaunchAtLogin
+            ? "Launch at login"
+            : "Launch at login (app bundle only)"
+        launchAtLoginToggle = NSButton(checkboxWithTitle: launchAtLoginTitle, target: self, action: #selector(launchAtLoginChanged))
+        launchAtLoginToggle.isEnabled = supportsLaunchAtLogin
+        launchAtLoginToggle.frame = NSRect(x: 20, y: y, width: 420, height: 20)
         view.addSubview(launchAtLoginToggle)
         y -= 40
 
@@ -617,7 +622,7 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
 
         // General
         audioFeedbackToggle.state = defaults.object(forKey: "audioFeedbackEnabled") as? Bool ?? true ? .on : .off
-        launchAtLoginToggle.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        launchAtLoginToggle.state = supportsLaunchAtLogin && SMAppService.mainApp.status == .enabled ? .on : .off
         floatingPillToggle.state = SinewBridge.shared.showFloatingPill ? .on : .off
         rustyBarToggle.state = SinewBridge.shared.useSinewVisualization ? .on : .off
         rustyBarToggle.isEnabled = SinewBridge.shared.isAvailable
@@ -737,6 +742,12 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
     }
 
     @objc private func launchAtLoginChanged() {
+        guard supportsLaunchAtLogin else {
+            launchAtLoginToggle.state = .off
+            logWarning("Launch at login unavailable outside app bundle builds")
+            return
+        }
+
         do {
             if launchAtLoginToggle.state == .on {
                 try SMAppService.mainApp.register()
