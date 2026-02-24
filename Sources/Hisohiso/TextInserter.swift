@@ -19,8 +19,9 @@ enum TextInserterError: Error, LocalizedError {
 
 /// Inserts text at the current cursor position using keyboard events
 final class TextInserter {
-    /// Maximum text length for direct character insertion (longer uses paste)
-    private let directInsertionThreshold = 100
+    /// Maximum text length for direct character insertion (longer uses paste).
+    /// Kept low to minimize main thread blocking from per-character usleep delays.
+    private let directInsertionThreshold = 50
 
     /// Insert text at the current cursor position
     /// - Parameter text: Text to insert
@@ -85,7 +86,8 @@ final class TextInserter {
         simulateCommandV()
 
         // Restore clipboard after a delay, but only if user/app did not change it.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+        // 300ms gives slow apps (Electron, browsers with extensions) time to process Cmd+V
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             let currentPasteboard = NSPasteboard.general
             guard currentPasteboard.changeCount == expectedChangeCount else {
                 return
