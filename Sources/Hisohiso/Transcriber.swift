@@ -119,9 +119,9 @@ struct CloudFallbackSettings {
     static func load() -> CloudFallbackSettings {
         let defaults = UserDefaults.standard
         return CloudFallbackSettings(
-            enabled: defaults.bool(forKey: "cloudFallbackEnabled"),
+            enabled: defaults.bool(for: .cloudFallbackEnabled),
             preferredProvider: CloudProviderType(
-                rawValue: defaults.string(forKey: "cloudFallbackProvider") ?? "openai"
+                rawValue: defaults.string(for: .cloudFallbackProvider) ?? "openai"
             ) ?? .openAI
         )
     }
@@ -129,8 +129,8 @@ struct CloudFallbackSettings {
     /// Save to UserDefaults
     func save() {
         let defaults = UserDefaults.standard
-        defaults.set(enabled, forKey: "cloudFallbackEnabled")
-        defaults.set(preferredProvider.rawValue, forKey: "cloudFallbackProvider")
+        defaults.set(enabled, for: .cloudFallbackEnabled)
+        defaults.set(preferredProvider.rawValue, for: .cloudFallbackProvider)
     }
 }
 
@@ -141,12 +141,12 @@ actor Transcriber {
     private var whisperKit: WhisperKit?
     private var asrManager: AsrManager?
     private var currentModel: TranscriptionModel?
-    private let timeoutSeconds: TimeInterval = 30
+    private let timeoutSeconds: TimeInterval = AppConstants.transcriptionTimeout
 
-    /// Cloud providers for fallback
-    private let cloudProviders: [CloudProviderType: CloudProvider] = [
-        .openAI: OpenAIProvider(),
-        .groq: GroqProvider()
+    /// Cloud providers for fallback, in priority order.
+    private let cloudProviders: [(type: CloudProviderType, provider: CloudProvider)] = [
+        (.openAI, OpenAIProvider()),
+        (.groq, GroqProvider())
     ]
 
     /// Cloud fallback settings
@@ -246,31 +246,32 @@ actor Transcriber {
     }
 
     /// Transcribe using cloud only (useful when local model unavailable)
-    /// - Parameter audioSamples: Audio samples at 16kHz mono
-    /// - Returns: Transcribed text
     func transcribeWithCloud(_ audioSamples: [Float]) async throws -> String {
         var attemptedProvider = false
         var lastError: Error?
 
-        // Try preferred provider first
         let preferredType = cloudFallbackSettings.preferredProvider
-        if let provider = cloudProviders[preferredType], provider.isConfigured {
+
+        // Try preferred provider first
+        if let entry = cloudProviders.first(where: { $0.type == preferredType }),
+           entry.provider.isConfigured
+        {
             attemptedProvider = true
-            logInfo("Transcribing with cloud provider: \(provider.displayName)")
+            logInfo("Transcribing with cloud provider: \(entry.provider.displayName)")
             do {
-                return try await provider.transcribe(audioSamples)
+                return try await entry.provider.transcribe(audioSamples)
             } catch {
                 lastError = error
                 logWarning("Preferred cloud provider failed: \(error.localizedDescription)")
             }
         }
 
-        // Try other configured providers
-        for (type, provider) in cloudProviders where type != preferredType && provider.isConfigured {
+        // Try remaining configured providers in order
+        for entry in cloudProviders where entry.type != preferredType && entry.provider.isConfigured {
             attemptedProvider = true
-            logInfo("Trying fallback cloud provider: \(provider.displayName)")
+            logInfo("Trying fallback cloud provider: \(entry.provider.displayName)")
             do {
-                return try await provider.transcribe(audioSamples)
+                return try await entry.provider.transcribe(audioSamples)
             } catch {
                 lastError = error
                 logWarning("Fallback cloud provider failed: \(error.localizedDescription)")
@@ -286,12 +287,12 @@ actor Transcriber {
 
     /// Check if any cloud provider is configured
     var hasCloudProvider: Bool {
-        cloudProviders.values.contains { $0.isConfigured }
+        cloudProviders.contains { $0.provider.isConfigured }
     }
 
     /// Get list of configured cloud providers
     var configuredCloudProviders: [CloudProvider] {
-        cloudProviders.values.filter { $0.isConfigured }
+        cloudProviders.filter { $0.provider.isConfigured }.map(\.provider)
     }
 
     private func transcribeWithWhisper(_ audioSamples: [Float]) async throws -> String {
@@ -341,7 +342,7 @@ actor Transcriber {
         }
 
         // Parakeet requires at least 1 second of audio (16000 samples at 16kHz)
-        guard audioSamples.count >= 16000 else {
+        guard audioSamples.count >= AppConstants.minTranscriptionSamples else {
             throw TranscriberError.invalidAudioData
         }
 

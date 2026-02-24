@@ -12,24 +12,28 @@ final class WakeWordManager: ObservableObject {
     /// Whether wake word detection is enabled
     @Published var isEnabled: Bool = false {
         didSet {
-            UserDefaults.standard.set(isEnabled, forKey: "wakeWordEnabled")
+            UserDefaults.standard.set(isEnabled, for: .wakeWordEnabled)
         }
     }
 
-    /// Whether currently listening for wake word
-    @Published private(set) var isListening = false
+    /// Whether currently listening for wake word.
+    /// `listeningFlag` is read from the audio thread without locking (atomic bool).
+    @Published private(set) var isListening = false {
+        didSet { listeningFlag = isListening }
+    }
+    nonisolated(unsafe) private var listeningFlag = false
 
     /// The configured wake phrase (e.g., "hey kevin", "computer").
     /// Empty or whitespace-only values are rejected to prevent false activations.
     var wakePhrase: String {
-        get { UserDefaults.standard.string(forKey: "wakePhrase") ?? "hey hisohiso" }
+        get { UserDefaults.standard.string(for: .wakePhrase) ?? AppConstants.defaultWakePhrase }
         set {
             let trimmed = newValue.lowercased().trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else {
                 logWarning("WakeWordManager: Rejecting empty wake phrase")
                 return
             }
-            UserDefaults.standard.set(trimmed, forKey: "wakePhrase")
+            UserDefaults.standard.set(trimmed, for: .wakePhrase)
         }
     }
 
@@ -38,14 +42,15 @@ final class WakeWordManager: ObservableObject {
 
     // MARK: - Private Properties
 
-    private var audioBuffer: [Float] = []
+    /// Audio buffer and VAD state — accessed from the audio thread, protected by `bufferLock`.
+    nonisolated(unsafe) private var _audioBuffer: [Float] = []
     private let bufferLock = NSLock()
 
-    /// VAD state
-    private var isSpeaking = false
-    private var silenceFrames = 0
-    private let silenceThreshold = 10 // ~850ms of silence
-    private let speechThreshold: Float = 0.015 // RMS threshold
+    /// VAD state — protected by `bufferLock`.
+    nonisolated(unsafe) private var _isSpeaking = false
+    nonisolated(unsafe) private var _silenceFrames = 0
+    private let silenceThreshold = AppConstants.wakeWordSilenceFrames
+    private let speechThreshold: Float = AppConstants.wakeWordSpeechThreshold
 
     /// Whisper tiny for wake phrase detection
     /// Marked `nonisolated(unsafe)` because `WhisperKit.transcribe` is nonisolated but
@@ -53,20 +58,20 @@ final class WakeWordManager: ObservableObject {
     nonisolated(unsafe) private var whisperKit: WhisperKit?
     private var isProcessing = false
 
-    /// Pre-buffer to capture audio before speech is detected
-    private var preBuffer: [[Float]] = []
-    private let preBufferFrames = 5 // Keep ~425ms of audio before speech detected
+    /// Pre-buffer to capture audio before speech is detected — protected by `bufferLock`.
+    nonisolated(unsafe) private var _preBuffer: [[Float]] = []
+    private let preBufferFrames = AppConstants.wakeWordPreBufferFrames
 
     /// Maximum buffer size (~3 seconds at 16kHz)
-    private let maxBufferSamples = 48000
+    private let maxBufferSamples = AppConstants.maxWakeWordBufferSamples
 
-    /// Frame counter for debug logging
-    private var frameCounter = 0
+    /// Frame counter for debug logging — protected by `bufferLock`.
+    nonisolated(unsafe) private var _frameCounter = 0
 
     // MARK: - Initialization
 
     init() {
-        let enabled = UserDefaults.standard.bool(forKey: "wakeWordEnabled")
+        let enabled = UserDefaults.standard.bool(for: .wakeWordEnabled)
         self.isEnabled = enabled
     }
 
@@ -99,8 +104,8 @@ final class WakeWordManager: ObservableObject {
     func stopListening() {
         isListening = false
         bufferLock.lock()
-        audioBuffer.removeAll()
-        preBuffer.removeAll()
+        _audioBuffer.removeAll()
+        _preBuffer.removeAll()
         bufferLock.unlock()
         logInfo("WakeWordManager: Stopped listening")
     }
@@ -120,23 +125,20 @@ final class WakeWordManager: ObservableObject {
 
     /// Feed audio samples from AudioRecorder's monitoring tap.
     ///
-    /// Called from the audio render thread. Dispatches to MainActor since
-    /// this type is `@MainActor`-isolated and accesses `@Published` properties.
+    /// Called from the audio render thread. VAD processing happens inline
+    /// to avoid ~85 MainActor dispatches/second. Only wake-phrase checking
+    /// dispatches to MainActor.
     nonisolated func processAudioSamples(_ samples: [Float], sampleRate: Double) {
         guard !samples.isEmpty else { return }
-        Task { @MainActor [weak self] in
-            self?.processAudioSamplesOnMain(samples, sampleRate: sampleRate)
-        }
-    }
 
-    /// Actual processing on MainActor.
-    private func processAudioSamplesOnMain(_ samples: [Float], sampleRate: Double) {
-        guard isListening else { return }
+        // Read listening state without locking — atomic bool read.
+        // Worst case: we process one extra buffer after stopListening.
+        guard listeningFlag else { return }
 
         // Resample to 16kHz if needed
         let resampled: [Float]
-        if abs(sampleRate - 16000) > 1 {
-            resampled = AudioDSP.resample(samples, from: sampleRate, to: 16000)
+        if abs(sampleRate - AppConstants.targetSampleRate) > 1 {
+            resampled = AudioDSP.resample(samples, from: sampleRate, to: AppConstants.targetSampleRate)
         } else {
             resampled = samples
         }
@@ -145,63 +147,63 @@ final class WakeWordManager: ObservableObject {
         var rms: Float = 0
         vDSP_rmsqv(resampled, 1, &rms, vDSP_Length(resampled.count))
 
-        // Debug logging every ~8.5 seconds
-        frameCounter += 1
-        if frameCounter % 100 == 1 {
-            logDebug("WakeWordManager: Audio frame \(frameCounter), RMS: \(String(format: "%.4f", rms))")
-        }
-
         let isSpeechFrame = rms > speechThreshold
 
         bufferLock.lock()
-        defer { bufferLock.unlock() }
+
+        // Debug logging every ~8.5 seconds
+        _frameCounter += 1
+        if _frameCounter % 100 == 1 {
+            let fc = _frameCounter
+            bufferLock.unlock()
+            logDebug("WakeWordManager: Audio frame \(fc), RMS: \(String(format: "%.4f", rms))")
+            bufferLock.lock()
+        }
 
         // Always keep a pre-buffer of recent audio
-        preBuffer.append(resampled)
-        if preBuffer.count > preBufferFrames {
-            preBuffer.removeFirst()
+        _preBuffer.append(resampled)
+        if _preBuffer.count > preBufferFrames {
+            _preBuffer.removeFirst()
         }
 
         if isSpeechFrame {
-            // Speech detected
-            if !isSpeaking {
-                isSpeaking = true
-                silenceFrames = 0
+            if !_isSpeaking {
+                _isSpeaking = true
+                _silenceFrames = 0
                 logDebug("WakeWordManager: Speech started (RMS: \(String(format: "%.4f", rms)))")
 
-                // Add pre-buffer to capture the start of speech
-                for frame in preBuffer {
-                    audioBuffer.append(contentsOf: frame)
+                for frame in _preBuffer {
+                    _audioBuffer.append(contentsOf: frame)
                 }
-                preBuffer.removeAll()
+                _preBuffer.removeAll()
             }
 
-            // Add current frame to buffer
-            audioBuffer.append(contentsOf: resampled)
+            _audioBuffer.append(contentsOf: resampled)
 
-            // Limit buffer size
-            if audioBuffer.count > maxBufferSamples {
-                audioBuffer.removeFirst(audioBuffer.count - maxBufferSamples)
+            if _audioBuffer.count > maxBufferSamples {
+                _audioBuffer.removeFirst(_audioBuffer.count - maxBufferSamples)
             }
 
-            silenceFrames = 0
-        } else if isSpeaking {
-            // Silence after speech - still add to buffer to capture trailing audio
-            audioBuffer.append(contentsOf: resampled)
-            silenceFrames += 1
+            _silenceFrames = 0
+        } else if _isSpeaking {
+            _audioBuffer.append(contentsOf: resampled)
+            _silenceFrames += 1
 
-            if silenceFrames >= silenceThreshold {
-                // End of speech - check for wake phrase
-                isSpeaking = false
-                let samplesForProcessing = audioBuffer
-                audioBuffer.removeAll()
+            if _silenceFrames >= silenceThreshold {
+                _isSpeaking = false
+                let samplesForProcessing = _audioBuffer
+                _audioBuffer.removeAll()
+                bufferLock.unlock()
 
-                // Process in background
-                Task { [weak self] in
+                // Only dispatch to MainActor for the actual wake-phrase check
+                Task { @MainActor [weak self] in
                     await self?.checkForWakePhrase(samples: samplesForProcessing)
                 }
+                return
             }
         }
+
+        bufferLock.unlock()
     }
 
     // MARK: - Private Methods
@@ -214,8 +216,8 @@ final class WakeWordManager: ObservableObject {
 
         logDebug("WakeWordManager: Checking \(samples.count) samples (\(String(format: "%.1f", Double(samples.count) / 16000.0))s)")
 
-        guard samples.count >= 8000 else {
-            logDebug("WakeWordManager: Too few samples (\(samples.count) < 8000)")
+        guard samples.count >= AppConstants.minWakeWordSamples else {
+            logDebug("WakeWordManager: Too few samples (\(samples.count) < \(AppConstants.minWakeWordSamples))")
             return
         }
 

@@ -127,7 +127,7 @@ final class EventTapManager: @unchecked Sendable {
                 guard let refcon else { return Unmanaged.passUnretained(event) }
                 let manager = Unmanaged<EventTapManager>.fromOpaque(refcon).takeUnretainedValue()
 
-                // Re-enable on timeout
+                // Re-enable on timeout or user input disabling
                 if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
                     if let tap = manager.eventTap {
                         CGEvent.tapEnable(tap: tap, enable: true)
@@ -135,6 +135,9 @@ final class EventTapManager: @unchecked Sendable {
                     return Unmanaged.passUnretained(event)
                 }
 
+                // Safety: never block the event tap for too long.
+                // All handlers must return synchronously and quickly.
+                // Heavy work should be dispatched to MainActor via Task.
                 let consumed = manager.dispatch(event: event, type: type)
                 return consumed ? nil : Unmanaged.passUnretained(event)
             },
@@ -167,7 +170,11 @@ final class EventTapManager: @unchecked Sendable {
     }
 
     /// Dispatch an event to all matching handlers.
-    /// Called on the event tap's thread (arbitrary).
+    ///
+    /// Called on the event tap's thread (arbitrary). Handlers **must** return
+    /// quickly — blocking here freezes all keyboard input system-wide.
+    /// Heavy work (UI updates, async operations) should be dispatched via
+    /// `Task { @MainActor in … }` from within the handler.
     private func dispatch(event: CGEvent, type: CGEventType) -> Bool {
         let handlers = lock.withLock {
             registrations.filter { $0.eventTypes.contains(type) }

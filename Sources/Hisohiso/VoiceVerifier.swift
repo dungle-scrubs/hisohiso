@@ -16,7 +16,7 @@ final class VoiceVerifier: @unchecked Sendable {
     static let sampleRate: Float = 16000
 
     /// Minimum samples required for verification (2 seconds at 16kHz)
-    static let minSamplesForVerification = 32000
+    static let minSamplesForVerification = AppConstants.minVoiceVerificationSamples
 
     /// Embedding dimension (Resemblyzer outputs 256-dim)
     static let embeddingDimension = 256
@@ -37,24 +37,21 @@ final class VoiceVerifier: @unchecked Sendable {
     /// Mel filterbank matrix (precomputed)
     private var melFilterbank: [[Float]]?
 
-    /// Serial queue for heavy compute (FFT, mel spectrogram, CoreML inference).
-    private let computeQueue = DispatchQueue(label: "com.hisohiso.voice-verifier", qos: .userInitiated)
-
     /// Protects `model` and `enrolledEmbedding` for thread-safe reads.
     private let lock = NSLock()
 
     /// Verification threshold (0.0 - 1.0, higher = stricter).
     /// Backed by UserDefaults (atomic for simple types).
     var threshold: Float {
-        get { Float(UserDefaults.standard.double(forKey: "voiceVerificationThreshold")) }
-        set { UserDefaults.standard.set(Double(newValue), forKey: "voiceVerificationThreshold") }
+        get { Float(UserDefaults.standard.double(for: .voiceVerificationThreshold)) }
+        set { UserDefaults.standard.set(Double(newValue), for: .voiceVerificationThreshold) }
     }
 
     /// Whether verification is enabled.
     /// Backed by UserDefaults (atomic for simple types).
     var isEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: "voiceVerificationEnabled") }
-        set { UserDefaults.standard.set(newValue, forKey: "voiceVerificationEnabled") }
+        get { UserDefaults.standard.bool(for: .voiceVerificationEnabled) }
+        set { UserDefaults.standard.set(newValue, for: .voiceVerificationEnabled) }
     }
 
     /// Whether a voice is enrolled
@@ -64,8 +61,8 @@ final class VoiceVerifier: @unchecked Sendable {
 
     private init() {
         // Set default threshold if not set
-        if UserDefaults.standard.object(forKey: "voiceVerificationThreshold") == nil {
-            threshold = 0.75
+        if !UserDefaults.standard.hasValue(for: .voiceVerificationThreshold) {
+            threshold = AppConstants.defaultVoiceVerificationThreshold
         }
 
         computeMelFilterbank()
@@ -248,7 +245,7 @@ final class VoiceVerifier: @unchecked Sendable {
     // MARK: - Embedding Generation
 
     /// Generate a 256-dimensional speaker embedding from audio samples.
-    /// Runs mel spectrogram computation and CoreML inference on a background queue.
+    /// Runs mel spectrogram computation and CoreML inference on a background thread.
     /// - Parameter audioSamples: Audio samples at 16kHz mono (needs ≥2 seconds).
     /// - Returns: 256-dimensional embedding vector.
     /// - Throws: `VoiceVerifierError` if the model is not loaded or audio is insufficient.
@@ -258,75 +255,63 @@ final class VoiceVerifier: @unchecked Sendable {
             throw VoiceVerifierError.modelNotLoaded
         }
 
-        guard audioSamples.count >= Self.minSamplesForVerification else {
+        guard audioSamples.count >= AppConstants.minVoiceVerificationSamples else {
             throw VoiceVerifierError.insufficientAudio(
-                required: Self.minSamplesForVerification,
+                required: AppConstants.minVoiceVerificationSamples,
                 provided: audioSamples.count
             )
         }
 
-        // Run heavy DSP + CoreML inference off the main thread
-        return try await withCheckedThrowingContinuation { continuation in
-            computeQueue.async { [self] in
-                do {
-                    // Compute mel spectrogram
-                    guard let melSpec = computeMelSpectrogram(from: audioSamples) else {
-                        continuation.resume(throwing: VoiceVerifierError.melComputationFailed)
-                        return
-                    }
+        // Run heavy DSP + CoreML inference on a detached task to avoid blocking
+        // the caller's executor. Structured concurrency ensures the task is
+        // automatically cancelled if the parent is cancelled.
+        return try await Task.detached(priority: .userInitiated) { [self] in
+            // Compute mel spectrogram
+            guard let melSpec = self.computeMelSpectrogram(from: audioSamples) else {
+                throw VoiceVerifierError.melComputationFailed
+            }
 
-                    // We need exactly partialFrames (160) frames for the model
-                    let partialFrames = Self.partialFrames
-                    guard melSpec.count >= partialFrames else {
-                        continuation.resume(throwing: VoiceVerifierError.insufficientAudio(
-                            required: partialFrames * Self.hopLength,
-                            provided: audioSamples.count
-                        ))
-                        return
-                    }
+            let partialFrames = Self.partialFrames
+            guard melSpec.count >= partialFrames else {
+                throw VoiceVerifierError.insufficientAudio(
+                    required: partialFrames * Self.hopLength,
+                    provided: audioSamples.count
+                )
+            }
 
-                    // Take a slice from the middle for better quality
-                    let startFrame = (melSpec.count - partialFrames) / 2
-                    let melSlice = Array(melSpec[startFrame ..< startFrame + partialFrames])
+            // Take a slice from the middle for better quality
+            let startFrame = (melSpec.count - partialFrames) / 2
+            let melSlice = Array(melSpec[startFrame..<startFrame + partialFrames])
 
-                    // Create MLMultiArray for input: (1, 160, 40)
-                    let inputArray = try MLMultiArray(
-                        shape: [1, NSNumber(value: partialFrames), NSNumber(value: Self.nMels)],
-                        dataType: .float32
-                    )
-                    for (frameIdx, frame) in melSlice.enumerated() {
-                        for (melIdx, value) in frame.enumerated() {
-                            let index = frameIdx * Self.nMels + melIdx
-                            inputArray[index] = NSNumber(value: value)
-                        }
-                    }
-
-                    // Create feature provider
-                    let inputFeatures = try MLDictionaryFeatureProvider(
-                        dictionary: ["mel_spectrogram": inputArray]
-                    )
-
-                    // Run inference
-                    let output = try capturedModel.prediction(from: inputFeatures)
-
-                    // Extract embedding
-                    guard let embeddingArray = output.featureValue(for: "embedding")?.multiArrayValue else {
-                        continuation.resume(throwing: VoiceVerifierError.invalidOutput)
-                        return
-                    }
-
-                    // Convert to Float array
-                    var embedding = [Float](repeating: 0, count: Self.embeddingDimension)
-                    for i in 0 ..< Self.embeddingDimension {
-                        embedding[i] = embeddingArray[i].floatValue
-                    }
-
-                    continuation.resume(returning: embedding)
-                } catch {
-                    continuation.resume(throwing: error)
+            // Create MLMultiArray for input: (1, 160, 40)
+            let inputArray = try MLMultiArray(
+                shape: [1, NSNumber(value: partialFrames), NSNumber(value: Self.nMels)],
+                dataType: .float32
+            )
+            for (frameIdx, frame) in melSlice.enumerated() {
+                for (melIdx, value) in frame.enumerated() {
+                    let index = frameIdx * Self.nMels + melIdx
+                    inputArray[index] = NSNumber(value: value)
                 }
             }
-        }
+
+            let inputFeatures = try MLDictionaryFeatureProvider(
+                dictionary: ["mel_spectrogram": inputArray]
+            )
+
+            let output = try capturedModel.prediction(from: inputFeatures)
+
+            guard let embeddingArray = output.featureValue(for: "embedding")?.multiArrayValue else {
+                throw VoiceVerifierError.invalidOutput
+            }
+
+            var embedding = [Float](repeating: 0, count: Self.embeddingDimension)
+            for i in 0..<Self.embeddingDimension {
+                embedding[i] = embeddingArray[i].floatValue
+            }
+
+            return embedding
+        }.value
     }
 
     // MARK: - Enrollment
@@ -554,8 +539,8 @@ enum VoiceVerifierError: Error, LocalizedError {
         case .modelNotLoaded:
             return "Speaker verification model not loaded"
         case .insufficientAudio(let required, let provided):
-            let reqSec = Double(required) / 16000
-            let provSec = Double(provided) / 16000
+            let reqSec = Double(required) / AppConstants.targetSampleRate
+            let provSec = Double(provided) / AppConstants.targetSampleRate
             return String(format: "Need %.1fs of audio, only %.1fs provided", reqSec, provSec)
         case .invalidOutput:
             return "Model produced invalid output"
