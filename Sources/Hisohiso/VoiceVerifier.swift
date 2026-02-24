@@ -210,6 +210,8 @@ final class VoiceVerifier: @unchecked Sendable {
                           let imagBase = imagBuffer.baseAddress else { return }
 
                     var splitComplex = DSPSplitComplex(realp: realBase, imagp: imagBase)
+                    // Safety: Float and DSPComplex (two Floats) share 4-byte alignment.
+                    // Swift's withMemoryRebound is defined behavior when alignment matches.
                     windowedFrame.withUnsafeBufferPointer { ptr in
                         guard let base = ptr.baseAddress else { return }
                         base.withMemoryRebound(to: DSPComplex.self, capacity: nFft / 2) { complexPtr in
@@ -245,10 +247,11 @@ final class VoiceVerifier: @unchecked Sendable {
 
     // MARK: - Embedding Generation
 
-    /// Generate speaker embedding from audio samples.
-    /// Runs heavy DSP and CoreML inference on a background queue.
-    /// - Parameter audioSamples: Audio samples at 16kHz mono (needs 2+ seconds)
-    /// - Returns: 256-dimensional embedding vector
+    /// Generate a 256-dimensional speaker embedding from audio samples.
+    /// Runs mel spectrogram computation and CoreML inference on a background queue.
+    /// - Parameter audioSamples: Audio samples at 16kHz mono (needs ≥2 seconds).
+    /// - Returns: 256-dimensional embedding vector.
+    /// - Throws: `VoiceVerifierError` if the model is not loaded or audio is insufficient.
     func generateEmbedding(from audioSamples: [Float]) async throws -> [Float] {
         let capturedModel = lock.withLock { model }
         guard let capturedModel else {
@@ -328,9 +331,10 @@ final class VoiceVerifier: @unchecked Sendable {
 
     // MARK: - Enrollment
 
-    /// Enroll a new voice using multiple audio samples
-    /// - Parameter samples: Array of audio sample arrays (each should be 2+ seconds)
-    /// - Returns: The averaged embedding that was enrolled
+    /// Enroll a new voice using multiple audio samples.
+    /// - Parameter samples: Array of audio sample arrays (each should be ≥2 seconds at 16kHz).
+    /// - Returns: The averaged, L2-normalized embedding that was enrolled.
+    /// - Throws: `VoiceVerifierError` if no valid embeddings could be generated.
     @discardableResult
     func enroll(with samples: [[Float]]) async throws -> [Float] {
         guard !samples.isEmpty else {
@@ -379,9 +383,10 @@ final class VoiceVerifier: @unchecked Sendable {
 
     // MARK: - Verification
 
-    /// Verify if the given audio matches the enrolled voice
-    /// - Parameter audioSamples: Audio samples to verify (2+ seconds at 16kHz)
-    /// - Returns: VerificationResult with match status and similarity score
+    /// Verify whether the given audio matches the enrolled voice.
+    /// - Parameter audioSamples: Audio samples at 16kHz mono (needs ≥2 seconds).
+    /// - Returns: Verification result with match status and similarity score.
+    /// - Throws: `VoiceVerifierError` if the model is not loaded or audio is insufficient.
     func verify(audioSamples: [Float]) async throws -> VerificationResult {
         guard isEnabled else {
             return VerificationResult(isMatch: true, similarity: 1.0, reason: .verificationDisabled)

@@ -128,9 +128,11 @@ final class HistoryStore {
         }
     }
 
-    /// Search transcriptions with fuzzy matching
-    /// - Parameter query: Search query string
-    /// - Returns: Matching transcription records, ranked by relevance
+    /// Search transcriptions with fuzzy matching.
+    /// Falls back to in-memory fuzzy matching (last 6 months, max 500 records) if
+    /// the predicate-based substring search finds no results.
+    /// - Parameter query: Search query string. Empty returns recent records.
+    /// - Returns: Matching transcription records ranked by relevance.
     func search(query: String) -> [TranscriptionRecord] {
         guard let context else { return [] }
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {

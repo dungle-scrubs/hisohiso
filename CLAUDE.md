@@ -99,7 +99,7 @@ Then ask Claude: "Check the log output and help me debug this issue"
 
 ## Sinew Integration
 
-See [RUSTYBAR_INTEGRATION.md](./RUSTYBAR_INTEGRATION.md) for:
+See [SINEW_INTEGRATION.md](./SINEW_INTEGRATION.md) for:
 - IPC protocol (`set <module_id> key=value ...`)
 - Sinew external module wiring
 - Runtime command examples
@@ -115,7 +115,7 @@ See [RUSTYBAR_INTEGRATION.md](./RUSTYBAR_INTEGRATION.md) for:
 - `ModelManager.swift` - Download and manage models for both backends
 - `TextFormatter.swift` - Smart formatting (capitalize, filler removal)
 - `TextInserter.swift` - Accessibility API text insertion
-- `RustyBarBridge.swift` - IPC to Sinew (see RUSTYBAR_INTEGRATION.md)
+- `SinewBridge.swift` - IPC to Sinew (see SINEW_INTEGRATION.md)
 - `HistoryStore.swift` - SwiftData persistence for transcription history
 - `KeychainManager.swift` - API keys + voice embedding storage
 - `Logger.swift` - File + OSLog logging (tail for LLM debugging)
@@ -127,7 +127,7 @@ See [RUSTYBAR_INTEGRATION.md](./RUSTYBAR_INTEGRATION.md) for:
 swift test
 ```
 
-Tests cover: TextFormatter, HistoryStore, SinewBridge/RustyBarBridge compatibility, HotkeyManager
+Tests cover: TextFormatter, HistoryStore, SinewBridge, HotkeyManager
 
 ## Lessons Learned
 

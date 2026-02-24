@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 
 /// Bridge to communicate with Sinew's external Hisohiso module via Unix socket IPC.
@@ -28,19 +29,9 @@ final class SinewBridge: @unchecked Sendable {
     }
 
     /// Whether to use Sinew for visualization.
-    /// Stored in UserDefaults with backward compatibility for legacy RustyBar key.
     var useSinewVisualization: Bool {
-        get {
-            if let value = UserDefaults.standard.object(forKey: "useSinewVisualization") as? Bool {
-                return value
-            }
-            return UserDefaults.standard.object(forKey: "useRustyBarVisualization") as? Bool ?? true
-        }
-        set {
-            UserDefaults.standard.set(newValue, forKey: "useSinewVisualization")
-            // Keep legacy key in sync for migration safety.
-            UserDefaults.standard.set(newValue, forKey: "useRustyBarVisualization")
-        }
+        get { UserDefaults.standard.object(forKey: "useSinewVisualization") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "useSinewVisualization") }
     }
 
     /// Whether to show the floating pill.
@@ -60,22 +51,7 @@ final class SinewBridge: @unchecked Sendable {
         isAvailable && useSinewVisualization
     }
 
-    /// Backward-compatible alias for legacy callers.
-    var useRustyBarVisualization: Bool {
-        get { useSinewVisualization }
-        set { useSinewVisualization = newValue }
-    }
-
-    /// Backward-compatible alias for legacy callers.
-    var shouldUseRustyBar: Bool {
-        shouldUseSinew
-    }
-
     private init() {
-        if UserDefaults.standard.object(forKey: "useSinewVisualization") == nil {
-            let legacy = UserDefaults.standard.object(forKey: "useRustyBarVisualization") as? Bool
-            UserDefaults.standard.set(legacy ?? true, forKey: "useSinewVisualization")
-        }
         if UserDefaults.standard.object(forKey: "showFloatingPill") == nil {
             UserDefaults.standard.set(false, forKey: "showFloatingPill")
         }
@@ -100,11 +76,6 @@ final class SinewBridge: @unchecked Sendable {
             send("set \(moduleID) drawing=on label=✗ color=#ff5555")
         }
     }
-
-    /// No-op: Sinew external modules do not expose a waveform API.
-    /// Audio levels are rendered by `FloatingPillWindow` instead; this method
-    /// exists only to keep the call site in `DictationController` uniform.
-    func sendAudioLevels(_ levels: [UInt8]) {}
 
     /// Check if Sinew socket is available.
     func checkAvailability() {
@@ -172,41 +143,39 @@ final class SinewBridge: @unchecked Sendable {
     }
 }
 
-/// Backward-compatible alias while callers migrate from RustyBar naming.
-typealias RustyBarBridge = SinewBridge
-
 // MARK: - Audio Level Calculator
 
 extension SinewBridge {
-    /// Calculate waveform levels from audio samples.
+    /// Calculate waveform levels from audio samples using Accelerate.
     /// - Parameter samples: Raw audio samples (16kHz mono).
-    /// - Returns: Array of 7 normalized levels (0-100).
+    /// - Returns: Array of 7 normalized levels (0–100).
     static func calculateAudioLevels(from samples: [Float]) -> [UInt8] {
+        let numBars = 7
         guard !samples.isEmpty else {
-            return [UInt8](repeating: 0, count: 7)
+            return [UInt8](repeating: 0, count: numBars)
         }
 
-        let numBars = 7
         let chunkSize = max(1, samples.count / numBars)
-
         var levels = [UInt8]()
+        levels.reserveCapacity(numBars)
 
         for i in 0 ..< numBars {
             let start = i * chunkSize
-            let end = min(start + chunkSize, samples.count)
-
-            if start < samples.count {
-                let chunk = samples[start ..< end]
-
-                // Calculate RMS for this chunk.
-                let rms = sqrt(chunk.map { $0 * $0 }.reduce(0, +) / Float(chunk.count))
-
-                // Normalize to 0-100 (raw values, UI will amplify as needed).
-                let normalized = min(100, max(0, Int(rms * 300)))
-                levels.append(UInt8(normalized))
-            } else {
+            guard start < samples.count else {
                 levels.append(0)
+                continue
             }
+
+            let end = min(start + chunkSize, samples.count)
+            let count = end - start
+
+            var rms: Float = 0
+            samples.withUnsafeBufferPointer { buf in
+                vDSP_rmsqv(buf.baseAddress! + start, 1, &rms, vDSP_Length(count))
+            }
+
+            let normalized = min(100, max(0, Int(rms * 300)))
+            levels.append(UInt8(normalized))
         }
 
         return levels

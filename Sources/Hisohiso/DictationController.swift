@@ -175,6 +175,7 @@ final class DictationController: ObservableObject {
     }
 
     /// Reinitialize the transcriber with the currently selected model.
+    /// - Throws: `DictationError.cannotChangeModelWhileBusy` if not idle.
     func reloadSelectedModel() async throws {
         guard stateManager.isIdle else {
             throw DictationError.cannotChangeModelWhileBusy
@@ -185,8 +186,8 @@ final class DictationController: ObservableObject {
         logInfo("Transcriber model reloaded: \(selectedModel.rawValue)")
     }
 
-    /// Start recording (can be called externally by wake word)
-    /// - Parameter fromWakeWord: If true, recording will auto-stop after silence
+    /// Start audio recording.
+    /// - Parameter fromWakeWord: If `true`, recording auto-stops after detecting silence.
     func startRecording(fromWakeWord: Bool = false) async {
         logInfo("startRecording called (fromWakeWord: \(fromWakeWord), currentState: \(stateManager.state))")
         
@@ -289,7 +290,6 @@ final class DictationController: ObservableObject {
 
         // Calculate levels and send to Sinew and UI
         let levels = SinewBridge.calculateAudioLevels(from: samples)
-        sinewBridge.sendAudioLevels(levels)
         onAudioLevels?(levels)
 
         // Auto-stop on silence for wake word triggered recordings
@@ -335,7 +335,7 @@ final class DictationController: ObservableObject {
         audioLevelTimer = nil
     }
 
-    /// Stop recording and transcribe (can be called externally by wake word)
+    /// Stop recording, transcribe the captured audio, and insert the result at the cursor.
     func stopRecordingAndTranscribe() async {
         guard stateManager.isRecording else {
             logWarning("Cannot stop recording: not recording")

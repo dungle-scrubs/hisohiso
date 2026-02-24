@@ -77,7 +77,7 @@ struct KeyCombo: Codable, Equatable, Sendable {
 @MainActor
 final class HotkeyManager: ObservableObject {
     /// Registration ID for EventTapManager. `nonisolated(unsafe)` allows access from `deinit`.
-    nonisolated(unsafe) private static let registrationID = "hotkey-manager"
+    private static let registrationID = "hotkey-manager"
 
     /// Current hotkey combo (nil = disabled). Published for UI binding.
     @Published private(set) var currentHotkey: KeyCombo?
@@ -108,8 +108,8 @@ final class HotkeyManager: ObservableObject {
 
     // MARK: - Public API
 
-    /// Set a new hotkey
-    /// - Parameter keyCombo: The key combination, or nil to disable
+    /// Set or clear the alternative hotkey.
+    /// - Parameter keyCombo: The key combination to use, or `nil` to disable.
     func setHotkey(_ keyCombo: KeyCombo?) {
         stop()
         currentHotkey = keyCombo

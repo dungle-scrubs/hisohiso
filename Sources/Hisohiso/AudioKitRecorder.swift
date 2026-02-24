@@ -19,9 +19,6 @@ final class AudioKitRecorder: @unchecked Sendable {
     /// Target sample rate for WhisperKit (16kHz)
     private let targetSampleRate: Double = 16000
     
-    /// Called periodically with audio samples for streaming transcription
-    var onAudioChunk: (([Float]) -> Void)?
-    
     init() {
         // Don't initialize engine in init - do it when recording starts
     }
@@ -128,9 +125,6 @@ final class AudioKitRecorder: @unchecked Sendable {
         bufferLock.lock()
         audioBuffer.append(contentsOf: floatData)
         bufferLock.unlock()
-        
-        // Notify for streaming
-        onAudioChunk?(floatData)
     }
     
     /// Resample audio using shared DSP utility.

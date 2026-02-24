@@ -28,6 +28,9 @@ final class EventTapManager: @unchecked Sendable {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
 
+    /// Event mask the running tap was created with.
+    private var currentEventMask: CGEventMask = 0
+
     private init() {}
 
     // MARK: - Registration
@@ -49,10 +52,21 @@ final class EventTapManager: @unchecked Sendable {
             registrations.append(Registration(id: id, eventTypes: eventTypes, handler: handler))
         }
 
-        // Restart the tap to pick up new event types
+        // Only restart the tap if the combined event mask changed
         if eventTap != nil {
-            stopTap()
-            _ = startTap()
+            let newMask: CGEventMask = lock.withLock {
+                var mask: CGEventMask = 0
+                for reg in registrations {
+                    for type in reg.eventTypes {
+                        mask |= (1 << type.rawValue)
+                    }
+                }
+                return mask
+            }
+            if newMask != currentEventMask {
+                stopTap()
+                _ = startTap()
+            }
         }
     }
 
@@ -101,6 +115,9 @@ final class EventTapManager: @unchecked Sendable {
             eventMask |= (1 << type.rawValue)
         }
 
+        // Save for comparison
+        currentEventMask = eventMask
+
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
@@ -145,6 +162,7 @@ final class EventTapManager: @unchecked Sendable {
         }
         eventTap = nil
         runLoopSource = nil
+        currentEventMask = 0
         logInfo("EventTapManager: stopped")
     }
 
