@@ -30,3 +30,12 @@ build/
 
 # Models (downloaded separately)
 Models/
+
+# ML model binaries (use Git LFS or download on demand)
+*.mlpackage/
+*.mlpackage.backup/
+*.mlmodelc/
+
+# Image assets committed by mistake
+Resources/*.jpg
+Resources/*.png
