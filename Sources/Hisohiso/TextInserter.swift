@@ -22,7 +22,7 @@ final class TextInserter {
     /// Maximum text length for direct character insertion (longer uses paste).
     /// Set conservatively low — per-character insertion uses usleep which blocks.
     /// Paste is faster and preferred for almost all real dictation output.
-    private let directInsertionThreshold = 10
+    private let directInsertionThreshold = AppConstants.directInsertionThreshold
 
     /// Insert text at the current cursor position
     /// - Parameter text: Text to insert
@@ -88,7 +88,7 @@ final class TextInserter {
         // Restore clipboard after a delay, but only if user/app did not change it.
         // 500ms gives slow apps (Electron, browsers with extensions) time to process Cmd+V.
         // Tradeoff: user's original clipboard is unavailable for 500ms after dictation.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + AppConstants.pasteRestoreDelay) {
             let currentPasteboard = NSPasteboard.general
             guard currentPasteboard.changeCount == expectedChangeCount else {
                 return
@@ -140,8 +140,8 @@ final class TextInserter {
         let source = CGEventSource(stateID: .hidSystemState)
 
         // V key code is 9
-        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true)
-        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false)
+        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: AppConstants.vKeyCode, keyDown: true)
+        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: AppConstants.vKeyCode, keyDown: false)
 
         keyDown?.flags = .maskCommand
         keyUp?.flags = .maskCommand

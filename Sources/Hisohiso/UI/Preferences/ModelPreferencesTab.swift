@@ -103,7 +103,7 @@ final class ModelPreferencesTab: NSView {
     /// Load current settings into controls.
     func loadSettings() {
         selectModelInPopup(modelManager.selectedModel)
-        let fillerWords = UserDefaults.standard.stringArray(forKey: "fillerWords") ?? Array(TextFormatter.defaultFillerWords)
+        let fillerWords = UserDefaults.standard.stringArray(for: .fillerWords) ?? Array(TextFormatter.defaultFillerWords)
         fillerWordsField.stringValue = fillerWords.joined(separator: ", ")
         updateModelUI()
     }
@@ -183,7 +183,7 @@ final class ModelPreferencesTab: NSView {
             .components(separatedBy: ",")
             .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
             .filter { !$0.isEmpty }
-        UserDefaults.standard.set(words, forKey: "fillerWords")
+        UserDefaults.standard.set(words, forKey: SettingsKey.fillerWords.rawValue)
         logInfo("Filler words saved: \(words)")
     }
 }

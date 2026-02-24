@@ -8,7 +8,7 @@ import Foundation
 /// `audioBuffer` is protected by `bufferLock` (NSLock). `isRecording` is only
 /// accessed from the main thread. `RawDataTap` callback delivers data on the
 /// audio render thread — only buffer append is done under lock.
-final class AudioKitRecorder: @unchecked Sendable {
+final class AudioKitRecorder: @unchecked Sendable, AudioRecording {
     private var engine: AudioEngine?
     private var tap: RawDataTap?
     
@@ -17,7 +17,7 @@ final class AudioKitRecorder: @unchecked Sendable {
     private var isRecording = false
     
     /// Target sample rate for WhisperKit (16kHz)
-    private let targetSampleRate: Double = 16000
+    private let targetSampleRate: Double = AppConstants.targetSampleRate
     
     init() {
         // Don't initialize engine in init - do it when recording starts
@@ -134,8 +134,4 @@ final class AudioKitRecorder: @unchecked Sendable {
         AudioDSP.resample(samples, from: sourceSampleRate, to: targetSampleRate)
     }
 
-    /// Normalize audio using shared DSP utility.
-    private func normalizeAudio(_ samples: [Float]) -> [Float] {
-        AudioDSP.normalize(samples)
-    }
 }

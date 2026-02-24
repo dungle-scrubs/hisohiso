@@ -30,20 +30,21 @@ final class SinewBridge: @unchecked Sendable {
 
     /// Whether to use Sinew for visualization.
     var useSinewVisualization: Bool {
-        get { UserDefaults.standard.object(forKey: "useSinewVisualization") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "useSinewVisualization") }
+        get { UserDefaults.standard.hasValue(for: .useSinewVisualization) ? UserDefaults.standard.bool(for: .useSinewVisualization) : true }
+        set { UserDefaults.standard.set(newValue, for: .useSinewVisualization) }
     }
 
     /// Whether to show the floating pill.
     /// Stored in UserDefaults.
     var showFloatingPill: Bool {
-        get { UserDefaults.standard.bool(forKey: "showFloatingPill") }
-        set { UserDefaults.standard.set(newValue, forKey: "showFloatingPill") }
+        get { UserDefaults.standard.bool(for: .showFloatingPill) }
+        set { UserDefaults.standard.set(newValue, for: .showFloatingPill) }
     }
 
-    /// Should we show the floating pill based on settings?
+    /// Show the floating pill if the user enabled it OR if Sinew is not available.
+    /// This ensures new users always see visual feedback during recording.
     var shouldShowFloatingPill: Bool {
-        showFloatingPill
+        showFloatingPill || !isAvailable
     }
 
     /// Should we send state updates to Sinew based on settings?
@@ -52,8 +53,8 @@ final class SinewBridge: @unchecked Sendable {
     }
 
     private init() {
-        if UserDefaults.standard.object(forKey: "showFloatingPill") == nil {
-            UserDefaults.standard.set(false, forKey: "showFloatingPill")
+        if !UserDefaults.standard.hasValue(for: .showFloatingPill) {
+            UserDefaults.standard.set(false, for: .showFloatingPill)
         }
         checkAvailability()
     }
@@ -150,7 +151,7 @@ extension SinewBridge {
     /// - Parameter samples: Raw audio samples (16kHz mono).
     /// - Returns: Array of 7 normalized levels (0–100).
     static func calculateAudioLevels(from samples: [Float]) -> [UInt8] {
-        let numBars = 7
+        let numBars = AppConstants.waveformBarCount
         guard !samples.isEmpty else {
             return [UInt8](repeating: 0, count: numBars)
         }
@@ -174,7 +175,7 @@ extension SinewBridge {
                 vDSP_rmsqv(buf.baseAddress! + start, 1, &rms, vDSP_Length(count))
             }
 
-            let normalized = min(100, max(0, Int(rms * 300)))
+            let normalized = min(100, max(0, Int(rms * AppConstants.audioLevelMultiplier)))
             levels.append(UInt8(normalized))
         }
 

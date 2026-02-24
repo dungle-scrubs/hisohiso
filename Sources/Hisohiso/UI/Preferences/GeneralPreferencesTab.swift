@@ -88,12 +88,12 @@ final class GeneralPreferencesTab: NSView {
     /// Load current settings into controls.
     func loadSettings() {
         let defaults = UserDefaults.standard
-        audioFeedbackToggle.state = defaults.object(forKey: "audioFeedbackEnabled") as? Bool ?? true ? .on : .off
+        audioFeedbackToggle.state = (defaults.hasValue(for: .audioFeedbackEnabled) ? defaults.bool(for: .audioFeedbackEnabled) : true) ? .on : .off
         launchAtLoginToggle.state = supportsLaunchAtLogin && SMAppService.mainApp.status == .enabled ? .on : .off
         floatingPillToggle.state = SinewBridge.shared.showFloatingPill ? .on : .off
         sinewToggle.state = SinewBridge.shared.useSinewVisualization ? .on : .off
         sinewToggle.isEnabled = SinewBridge.shared.isAvailable
-        useAudioKitToggle.state = defaults.bool(forKey: "useAudioKit") ? .on : .off
+        useAudioKitToggle.state = defaults.bool(for: .useAudioKit) ? .on : .off
     }
 
     // MARK: - Actions
@@ -101,7 +101,7 @@ final class GeneralPreferencesTab: NSView {
     private func populateMicrophonePopup() {
         microphonePopup.removeAllItems()
         let devices = AudioRecorder.availableInputDevices()
-        let selectedUID = UserDefaults.standard.string(forKey: "selectedAudioDeviceUID")
+        let selectedUID = UserDefaults.standard.string(for: .selectedAudioDeviceUID)
         for device in devices {
             let item = NSMenuItem(title: device.name, action: nil, keyEquivalent: "")
             item.representedObject = device
@@ -116,20 +116,20 @@ final class GeneralPreferencesTab: NSView {
         guard let selectedItem = microphonePopup.selectedItem,
               let device = selectedItem.representedObject as? AudioInputDevice else { return }
         if device.uid == AudioInputDevice.systemDefault.uid {
-            UserDefaults.standard.removeObject(forKey: "selectedAudioDeviceUID")
+            UserDefaults.standard.remove(for: .selectedAudioDeviceUID)
         } else {
-            UserDefaults.standard.set(device.uid, forKey: "selectedAudioDeviceUID")
+            UserDefaults.standard.set(device.uid, for: .selectedAudioDeviceUID)
         }
         NotificationCenter.default.post(name: .audioInputDeviceChanged, object: nil)
         logInfo("Microphone preference changed to: \(device.name)")
     }
 
     @objc private func useAudioKitChanged() {
-        UserDefaults.standard.set(useAudioKitToggle.state == .on, forKey: "useAudioKit")
+        UserDefaults.standard.set(useAudioKitToggle.state == .on, for: .useAudioKit)
     }
 
     @objc private func audioFeedbackChanged() {
-        UserDefaults.standard.set(audioFeedbackToggle.state == .on, forKey: "audioFeedbackEnabled")
+        UserDefaults.standard.set(audioFeedbackToggle.state == .on, for: .audioFeedbackEnabled)
     }
 
     @objc private func launchAtLoginChanged() {

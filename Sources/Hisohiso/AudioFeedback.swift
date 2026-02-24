@@ -7,7 +7,7 @@ final class AudioFeedback {
 
     /// Whether audio feedback is enabled (reads from UserDefaults)
     var isEnabled: Bool {
-        UserDefaults.standard.object(forKey: "audioFeedbackEnabled") as? Bool ?? true
+        UserDefaults.standard.hasValue(for: .audioFeedbackEnabled) ? UserDefaults.standard.bool(for: .audioFeedbackEnabled) : true
     }
 
     init() {

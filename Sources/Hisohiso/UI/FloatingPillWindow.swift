@@ -219,7 +219,7 @@ final class FloatingPillWindow: NSWindow {
 
         // Auto-dismiss error after 3 seconds
         if case .error = state {
-            autoDismissTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
+            autoDismissTimer = Timer.scheduledTimer(withTimeInterval: AppConstants.errorAutoDismissDelay, repeats: false) { [weak self] _ in
                 self?.orderOut(nil)
                 self?.waveformView = nil
                 onDismiss()

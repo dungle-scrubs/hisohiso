@@ -52,7 +52,7 @@ enum AudioRecorderError: Error, LocalizedError {
 /// Audio tap callbacks run on the audio render thread; public API is called from
 /// `@MainActor`. The lock is held only for short reads/writes — never across I/O
 /// or engine operations.
-final class AudioRecorder: @unchecked Sendable {
+final class AudioRecorder: @unchecked Sendable, AudioRecording {
     /// Recorder lifecycle states. Transitions:
     /// `idle` → `monitoring` → `idle`
     /// `idle` → `recording` → `idle`
@@ -77,7 +77,7 @@ final class AudioRecorder: @unchecked Sendable {
     }
 
     /// Target sample rate for WhisperKit (16kHz)
-    private let targetSampleRate: Double = 16000
+    private let targetSampleRate: Double = AppConstants.targetSampleRate
 
     /// Currently selected device (nil = system default)
     private var selectedDeviceUID: String?
@@ -85,12 +85,9 @@ final class AudioRecorder: @unchecked Sendable {
     /// Called continuously with audio samples when monitoring (for wake word detection)
     var onMonitoringSamples: ((_ samples: [Float], _ sampleRate: Double) -> Void)?
 
-    /// UserDefaults key for persisted device selection
-    private static let selectedDeviceKey = "selectedAudioDeviceUID"
-
     init() {
         // Load persisted device selection
-        selectedDeviceUID = UserDefaults.standard.string(forKey: Self.selectedDeviceKey)
+        selectedDeviceUID = UserDefaults.standard.string(for: .selectedAudioDeviceUID)
     }
 
     // MARK: - Device Enumeration
@@ -208,10 +205,10 @@ final class AudioRecorder: @unchecked Sendable {
     func setInputDevice(_ device: AudioInputDevice) {
         if device.uid == AudioInputDevice.systemDefault.uid {
             selectedDeviceUID = nil
-            UserDefaults.standard.removeObject(forKey: Self.selectedDeviceKey)
+            UserDefaults.standard.remove(for: .selectedAudioDeviceUID)
         } else {
             selectedDeviceUID = device.uid
-            UserDefaults.standard.set(device.uid, forKey: Self.selectedDeviceKey)
+            UserDefaults.standard.set(device.uid, for: .selectedAudioDeviceUID)
         }
         logInfo("Audio input device set to: \(device.name)")
     }
@@ -453,7 +450,8 @@ final class AudioRecorder: @unchecked Sendable {
             try engine.start()
             logDebug("Audio monitoring resumed")
         } catch {
-            logError("Failed to resume monitoring: \(error)")
+            logError("Failed to resume monitoring, resetting to idle: \(error)")
+            state = .idle
         }
     }
     
@@ -519,8 +517,4 @@ final class AudioRecorder: @unchecked Sendable {
         AudioDSP.resample(samples, from: sourceSampleRate, to: targetSampleRate)
     }
 
-    /// Normalize audio using shared DSP utility.
-    private func normalizeAudio(_ samples: [Float]) -> [Float] {
-        AudioDSP.normalize(samples)
-    }
 }

@@ -24,7 +24,7 @@ final class ModelManager: ObservableObject {
 
     init() {
         // Load saved model selection
-        if let savedModel = UserDefaults.standard.string(forKey: "selectedModel"),
+        if let savedModel = UserDefaults.standard.string(for: .selectedModel),
            let model = TranscriptionModel(rawValue: savedModel) {
             selectedModel = model
         }
@@ -177,7 +177,7 @@ final class ModelManager: ObservableObject {
 
     /// Save the selected model to UserDefaults
     func saveSelectedModel() {
-        UserDefaults.standard.set(selectedModel.rawValue, forKey: "selectedModel")
+        UserDefaults.standard.set(selectedModel.rawValue, for: .selectedModel)
         logInfo("Saved selected model: \(selectedModel.rawValue)")
     }
 }

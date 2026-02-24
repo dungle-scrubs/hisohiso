@@ -95,8 +95,6 @@ final class HotkeyManager: ObservableObject {
 
     private var isHotkeyPressed = false
 
-    private let userDefaultsKey = "alternativeHotkey"
-
     init() {
         hotkeyLock = os.OSAllocatedUnfairLock(initialState: nil)
         loadSavedHotkey()
@@ -185,7 +183,7 @@ final class HotkeyManager: ObservableObject {
     }
 
     private func loadSavedHotkey() {
-        guard let data = UserDefaults.standard.data(forKey: userDefaultsKey),
+        guard let data = UserDefaults.standard.data(for: .alternativeHotkey),
               let hotkey = try? JSONDecoder().decode(KeyCombo.self, from: data)
         else {
             currentHotkey = nil
@@ -200,9 +198,9 @@ final class HotkeyManager: ObservableObject {
         if let hotkey = currentHotkey,
            let data = try? JSONEncoder().encode(hotkey)
         {
-            UserDefaults.standard.set(data, forKey: userDefaultsKey)
+            UserDefaults.standard.set(data, for: .alternativeHotkey)
         } else {
-            UserDefaults.standard.removeObject(forKey: userDefaultsKey)
+            UserDefaults.standard.remove(for: .alternativeHotkey)
         }
     }
 }

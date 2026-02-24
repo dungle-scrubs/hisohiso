@@ -23,7 +23,7 @@ final class GlobeKeyMonitor {
     var onGlobeHoldEnd: (@MainActor () -> Void)?
 
     /// Threshold to distinguish tap from hold (in seconds)
-    private let holdThreshold: TimeInterval = 0.3
+    private let holdThreshold: TimeInterval = AppConstants.globeHoldThreshold
     private var pressTime: Date?
     private var isHolding = false
 
