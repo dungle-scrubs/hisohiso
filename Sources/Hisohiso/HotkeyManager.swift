@@ -76,8 +76,8 @@ struct KeyCombo: Codable, Equatable, Sendable {
 /// callback (which runs on an arbitrary thread) can read it safely.
 @MainActor
 final class HotkeyManager: ObservableObject {
-    /// Registration ID for EventTapManager. `nonisolated(unsafe)` allows access from `deinit`.
-    nonisolated(unsafe) private static let registrationID = "hotkey-manager"
+    /// Registration ID for EventTapManager.
+    private static let registrationID = "hotkey-manager"
 
     /// Current hotkey combo (nil = disabled). Published for UI binding.
     @Published private(set) var currentHotkey: KeyCombo?

@@ -287,9 +287,8 @@ final class DictationController: ObservableObject {
             samples = audioRecorder.getRecentSamples(count: 1600)
         }
 
-        // Calculate levels and send to Sinew and UI
+        // Calculate levels and send to UI
         let levels = SinewBridge.calculateAudioLevels(from: samples)
-        sinewBridge.sendAudioLevels(levels)
         onAudioLevels?(levels)
 
         // Auto-stop on silence for wake word triggered recordings

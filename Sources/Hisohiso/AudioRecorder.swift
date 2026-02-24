@@ -77,9 +77,6 @@ final class AudioRecorder: @unchecked Sendable {
     /// Currently selected device (nil = system default)
     private var selectedDeviceUID: String?
 
-    /// Called periodically with audio samples for streaming transcription
-    var onAudioChunk: (([Float]) -> Void)?
-
     /// Called continuously with audio samples when monitoring (for wake word detection)
     var onMonitoringSamples: ((_ samples: [Float], _ sampleRate: Double) -> Void)?
 
@@ -487,9 +484,6 @@ final class AudioRecorder: @unchecked Sendable {
         stateLock.lock()
         audioBuffer.append(contentsOf: resampledSamples)
         stateLock.unlock()
-
-        // Notify for streaming
-        onAudioChunk?(resampledSamples)
     }
 
     /// Resample audio using shared DSP utility.

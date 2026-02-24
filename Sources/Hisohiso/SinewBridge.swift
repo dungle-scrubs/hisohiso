@@ -28,19 +28,9 @@ final class SinewBridge: @unchecked Sendable {
     }
 
     /// Whether to use Sinew for visualization.
-    /// Stored in UserDefaults with backward compatibility for legacy RustyBar key.
     var useSinewVisualization: Bool {
-        get {
-            if let value = UserDefaults.standard.object(forKey: "useSinewVisualization") as? Bool {
-                return value
-            }
-            return UserDefaults.standard.object(forKey: "useRustyBarVisualization") as? Bool ?? true
-        }
-        set {
-            UserDefaults.standard.set(newValue, forKey: "useSinewVisualization")
-            // Keep legacy key in sync for migration safety.
-            UserDefaults.standard.set(newValue, forKey: "useRustyBarVisualization")
-        }
+        get { UserDefaults.standard.object(forKey: "useSinewVisualization") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "useSinewVisualization") }
     }
 
     /// Whether to show the floating pill.
@@ -60,22 +50,7 @@ final class SinewBridge: @unchecked Sendable {
         isAvailable && useSinewVisualization
     }
 
-    /// Backward-compatible alias for legacy callers.
-    var useRustyBarVisualization: Bool {
-        get { useSinewVisualization }
-        set { useSinewVisualization = newValue }
-    }
-
-    /// Backward-compatible alias for legacy callers.
-    var shouldUseRustyBar: Bool {
-        shouldUseSinew
-    }
-
     private init() {
-        if UserDefaults.standard.object(forKey: "useSinewVisualization") == nil {
-            let legacy = UserDefaults.standard.object(forKey: "useRustyBarVisualization") as? Bool
-            UserDefaults.standard.set(legacy ?? true, forKey: "useSinewVisualization")
-        }
         if UserDefaults.standard.object(forKey: "showFloatingPill") == nil {
             UserDefaults.standard.set(false, forKey: "showFloatingPill")
         }
@@ -100,11 +75,6 @@ final class SinewBridge: @unchecked Sendable {
             send("set \(moduleID) drawing=on label=✗ color=#ff5555")
         }
     }
-
-    /// No-op: Sinew external modules do not expose a waveform API.
-    /// Audio levels are rendered by `FloatingPillWindow` instead; this method
-    /// exists only to keep the call site in `DictationController` uniform.
-    func sendAudioLevels(_ levels: [UInt8]) {}
 
     /// Check if Sinew socket is available.
     func checkAvailability() {
@@ -171,9 +141,6 @@ final class SinewBridge: @unchecked Sendable {
         }
     }
 }
-
-/// Backward-compatible alias while callers migrate from RustyBar naming.
-typealias RustyBarBridge = SinewBridge
 
 // MARK: - Audio Level Calculator
 
