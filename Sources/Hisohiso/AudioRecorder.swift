@@ -203,7 +203,8 @@ final class AudioRecorder: @unchecked Sendable {
         return Self.availableInputDevices().first { $0.uid == uid } ?? .systemDefault
     }
 
-    /// Set the input device to use
+    /// Set the audio input device to use for recording.
+    /// - Parameter device: The device to use, or `.systemDefault` for the system default.
     func setInputDevice(_ device: AudioInputDevice) {
         if device.uid == AudioInputDevice.systemDefault.uid {
             selectedDeviceUID = nil
@@ -270,8 +271,9 @@ final class AudioRecorder: @unchecked Sendable {
         }
     }
 
-    /// Start recording audio
-    /// - Throws: AudioRecorderError if recording fails to start
+    /// Start recording audio from the selected input device.
+    /// Installs an audio tap on the input node and captures samples at 16kHz mono.
+    /// - Throws: `AudioRecorderError` if the engine fails to start or no input is available.
     func startRecording() throws {
         logInfo("AudioRecorder.startRecording() called (state: \(state))")
 
@@ -321,8 +323,8 @@ final class AudioRecorder: @unchecked Sendable {
         }
     }
 
-    /// Stop recording and return the captured audio samples
-    /// - Returns: Audio samples resampled to 16kHz mono, normalized
+    /// Stop recording and return the captured audio.
+    /// - Returns: Audio samples resampled to 16kHz mono and normalized, or empty if not recording.
     func stopRecording() -> [Float] {
         let currentState = state
         guard currentState == .recording || currentState == .recordingFromMonitoring else {
@@ -364,8 +366,9 @@ final class AudioRecorder: @unchecked Sendable {
     
     // MARK: - Monitoring Mode (for wake word detection)
     
-    /// Start continuous audio monitoring without recording
-    /// Audio samples are sent to `onMonitoringSamples` callback
+    /// Start continuous audio monitoring for wake word detection.
+    /// Samples are delivered to the `onMonitoringSamples` callback.
+    /// - Throws: `AudioRecorderError` if the engine fails to start.
     func startMonitoring() throws {
         guard state == .idle else {
             logDebug("Already monitoring or recording")
@@ -446,9 +449,9 @@ final class AudioRecorder: @unchecked Sendable {
         onMonitoringSamples?(samples, sampleRate)
     }
 
-    /// Get the most recent audio samples (for visualization)
-    /// - Parameter count: Number of samples to return
-    /// - Returns: Most recent samples (or fewer if not enough recorded)
+    /// Get the most recent audio samples from the recording buffer.
+    /// - Parameter count: Maximum number of samples to return.
+    /// - Returns: Most recent samples, or fewer if not enough have been recorded.
     func getRecentSamples(count: Int) -> [Float] {
         stateLock.lock()
         defer { stateLock.unlock() }
