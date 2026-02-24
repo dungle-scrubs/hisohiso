@@ -330,9 +330,11 @@ final class DictationController: ObservableObject {
             return
         }
 
-        audioFeedback.playStop()
         stopAudioLevelUpdates()
+        // Send zero levels to clear the waveform before the stop sound plays
+        onAudioLevels?([UInt8](repeating: 0, count: AppConstants.waveformBarCount))
         stopEscapeMonitor()
+        audioFeedback.playStop()
 
         let audioSamples = activeRecorder.stopRecording()
 

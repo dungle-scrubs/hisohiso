@@ -276,9 +276,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
 
-            // Forward audio levels to floating pill
+            // Forward audio levels to floating pill and Sinew
             controller.onAudioLevels = { [weak self] levels in
                 self?.floatingPill?.updateAudioLevels(levels)
+                SinewBridge.shared.sendLevels(levels)
             }
         }
 
@@ -375,7 +376,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateFloatingPill(for state: RecordingState) {
         logInfo("updateFloatingPill called with state: \(state)")
 
-        // Check if pill should be shown
+        // Re-check Sinew availability (may have started/stopped since last check)
+        SinewBridge.shared.checkAvailability()
+
+        // Check if pill should be shown (disabled when Sinew module is active)
         let showPill = SinewBridge.shared.shouldShowFloatingPill
 
         // Always show pill for errors (Sinew module does not render detailed error text)

@@ -136,7 +136,7 @@ enum AppConstants {
     static let waveformBarCount = 7
 
     /// Audio level multiplier for waveform display normalization.
-    static let audioLevelMultiplier: Float = 300
+    static let audioLevelMultiplier: Float = 800
 
     // MARK: - Key Codes
 
