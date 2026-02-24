@@ -48,7 +48,9 @@ final class WakeWordManager: ObservableObject {
     private let speechThreshold: Float = 0.015 // RMS threshold
 
     /// Whisper tiny for wake phrase detection
-    private var whisperKit: WhisperKit?
+    /// Marked `nonisolated(unsafe)` because `WhisperKit.transcribe` is nonisolated but
+    /// internally thread-safe. All writes happen on MainActor (init, deinit).
+    nonisolated(unsafe) private var whisperKit: WhisperKit?
     private var isProcessing = false
 
     /// Pre-buffer to capture audio before speech is detected
@@ -133,8 +135,8 @@ final class WakeWordManager: ObservableObject {
 
         // Resample to 16kHz if needed
         let resampled: [Float]
-        if sampleRate != 16000 {
-            resampled = resampleTo16kHz(samples, fromRate: sampleRate)
+        if abs(sampleRate - 16000) > 1 {
+            resampled = AudioDSP.resample(samples, from: sampleRate, to: 16000)
         } else {
             resampled = samples
         }
@@ -203,20 +205,6 @@ final class WakeWordManager: ObservableObject {
     }
 
     // MARK: - Private Methods
-
-    private func resampleTo16kHz(_ samples: [Float], fromRate: Double) -> [Float] {
-        guard fromRate != 16000 else { return samples }
-
-        let ratio = 16000.0 / fromRate
-        let outputLength = Int(Double(samples.count) * ratio)
-        guard outputLength > 0 else { return [] }
-
-        var output = [Float](repeating: 0, count: outputLength)
-        var control = (0 ..< outputLength).map { Float($0) / Float(ratio) }
-        vDSP_vlint(samples, &control, 1, &output, 1, vDSP_Length(outputLength), vDSP_Length(samples.count))
-
-        return output
-    }
 
     private func checkForWakePhrase(samples: [Float]) async {
         guard !isProcessing else {

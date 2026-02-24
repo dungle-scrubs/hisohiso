@@ -124,12 +124,22 @@ final class ModelManager: ObservableObject {
             throw NSError(domain: "ModelManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid model version"])
         }
 
-        // FluidAudio handles its own download and caching
-        // We just trigger the download by loading the models
         logInfo("Downloading Parakeet \(version) models via FluidAudio...")
 
-        // FluidAudio downloads models automatically when we try to load them
-        // This triggers the download to the default cache location
+        // FluidAudio doesn't expose download progress. Use an indeterminate
+        // animation by cycling downloadProgress while waiting.
+        let progressTask = Task { @MainActor in
+            var tick: Double = 0
+            while !Task.isCancelled {
+                // Oscillate between 0.05 and 0.95 to signal "working"
+                tick += 0.02
+                downloadProgress = 0.05 + 0.9 * abs(sin(tick))
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
+
+        defer { progressTask.cancel() }
+
         _ = try await AsrModels.downloadAndLoad(version: version)
 
         logInfo("Parakeet \(version) models downloaded")

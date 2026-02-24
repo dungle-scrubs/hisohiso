@@ -50,21 +50,6 @@ final class HistoryPaletteWindow: NSPanel {
         setupViews()
     }
 
-    deinit {
-        if let monitor = localKeyMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
-        if let monitor = localClickMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
-        if let monitor = globalClickMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
-        if let monitor = mouseMovedMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
-    }
-
     private func setupWindow() {
         isOpaque = false
         backgroundColor = .clear
@@ -228,17 +213,10 @@ final class HistoryPaletteWindow: NSPanel {
     }
 
     private func setupCursorMonitor() {
-        // Push our cursor onto the stack to maintain it
-        NSCursor.pointingHand.push()
-        
-        // Monitor mouse moved to set cursor based on position
         mouseMovedMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .mouseEntered, .mouseExited, .scrollWheel]) { [weak self] event in
             guard let self, self.isVisible else { return event }
-            
-            // Get mouse location in window coordinates
+
             let locationInWindow = event.locationInWindow
-            
-            // Check if over the scroll view (table area) but not over the scroller
             let scrollViewFrame = self.scrollView.frame
             let scrollerWidth: CGFloat = 15
             let tableAreaFrame = NSRect(
@@ -247,11 +225,13 @@ final class HistoryPaletteWindow: NSPanel {
                 width: scrollViewFrame.width - scrollerWidth,
                 height: scrollViewFrame.height
             )
-            
+
             if tableAreaFrame.contains(locationInWindow) {
                 NSCursor.pointingHand.set()
+            } else {
+                NSCursor.arrow.set()
             }
-            
+
             return event
         }
     }
@@ -261,7 +241,7 @@ final class HistoryPaletteWindow: NSPanel {
             NSEvent.removeMonitor(monitor)
             mouseMovedMonitor = nil
         }
-        NSCursor.pop()
+        NSCursor.arrow.set()
     }
 
     private func handleKeyDown(_ event: NSEvent) -> Bool {

@@ -48,7 +48,9 @@ final class TextInserter {
         }
     }
 
-    /// Insert text character by character using keyboard events
+    /// Insert text character by character using keyboard events.
+    /// Only used for very short strings (≤10 chars). macOS 14+ queues
+    /// CGEvents reliably without artificial inter-character delays.
     private func insertViaKeyEvents(_ text: String) {
         let source = CGEventSource(stateID: .hidSystemState)
 
@@ -62,9 +64,6 @@ final class TextInserter {
 
             keyDown?.post(tap: .cgAnnotatedSessionEventTap)
             keyUp?.post(tap: .cgAnnotatedSessionEventTap)
-
-            // Small delay to prevent dropped characters
-            usleep(1000) // 1ms
         }
     }
 
@@ -87,8 +86,9 @@ final class TextInserter {
         simulateCommandV()
 
         // Restore clipboard after a delay, but only if user/app did not change it.
-        // 300ms gives slow apps (Electron, browsers with extensions) time to process Cmd+V
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        // 500ms gives slow apps (Electron, browsers with extensions) time to process Cmd+V.
+        // Tradeoff: user's original clipboard is unavailable for 500ms after dictation.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             let currentPasteboard = NSPasteboard.general
             guard currentPasteboard.changeCount == expectedChangeCount else {
                 return

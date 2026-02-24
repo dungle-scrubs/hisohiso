@@ -48,27 +48,32 @@ enum AudioRecorderError: Error, LocalizedError {
 /// Records audio from the system default input device using AVAudioEngine.
 ///
 /// ## Thread safety
-/// All mutable state (`audioBuffer`, `isRecording`, `isMonitoring`) is protected by
-/// `stateLock` (NSLock). Audio tap callbacks run on the audio render thread; public
-/// API is called from `@MainActor`. The lock is held only for short reads/writes —
-/// never across I/O or engine operations.
+/// All mutable state (`audioBuffer`, `_state`) is protected by `stateLock` (NSLock).
+/// Audio tap callbacks run on the audio render thread; public API is called from
+/// `@MainActor`. The lock is held only for short reads/writes — never across I/O
+/// or engine operations.
 final class AudioRecorder: @unchecked Sendable {
+    /// Recorder lifecycle states. Transitions:
+    /// `idle` → `monitoring` → `idle`
+    /// `idle` → `recording` → `idle`
+    /// `monitoring` → `recordingFromMonitoring` → `monitoring` (pause/resume)
+    private enum State {
+        case idle
+        case monitoring
+        case recording
+        /// Monitoring was active before recording started; resume after stop.
+        case recordingFromMonitoring
+    }
+
     private let engine = AVAudioEngine()
     private var audioBuffer: [Float] = []
     private let stateLock = NSLock()
-    private var _isRecording = false
-    private var _isMonitoring = false
+    private var _state: State = .idle
 
-    /// Thread-safe read for recording state.
-    private var isRecording: Bool {
-        get { stateLock.withLock { _isRecording } }
-        set { stateLock.withLock { _isRecording = newValue } }
-    }
-
-    /// Thread-safe read for monitoring state.
-    private var isMonitoring: Bool {
-        get { stateLock.withLock { _isMonitoring } }
-        set { stateLock.withLock { _isMonitoring = newValue } }
+    /// Thread-safe read for current state.
+    private var state: State {
+        get { stateLock.withLock { _state } }
+        set { stateLock.withLock { _state = newValue } }
     }
 
     /// Target sample rate for WhisperKit (16kHz)
@@ -268,19 +273,19 @@ final class AudioRecorder: @unchecked Sendable {
     /// Start recording audio
     /// - Throws: AudioRecorderError if recording fails to start
     func startRecording() throws {
-        logInfo("AudioRecorder.startRecording() called (isRecording: \(isRecording), isMonitoring: \(isMonitoring))")
-        
-        guard !isRecording else {
+        logInfo("AudioRecorder.startRecording() called (state: \(state))")
+
+        let currentState = state
+        guard currentState == .idle || currentState == .monitoring else {
             logWarning("Already recording, returning early")
             return
         }
 
         // Stop monitoring if active (can't have two taps on same node)
-        if isMonitoring {
+        if currentState == .monitoring {
             logInfo("Stopping monitoring tap before recording...")
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
-            // Keep isMonitoring true so we resume after recording
             logInfo("Monitoring paused for recording")
         }
 
@@ -308,7 +313,7 @@ final class AudioRecorder: @unchecked Sendable {
 
         do {
             try engine.start()
-            isRecording = true
+            state = currentState == .monitoring ? .recordingFromMonitoring : .recording
             logInfo("Recording started")
         } catch {
             inputNode.removeTap(onBus: 0)
@@ -319,14 +324,15 @@ final class AudioRecorder: @unchecked Sendable {
     /// Stop recording and return the captured audio samples
     /// - Returns: Audio samples resampled to 16kHz mono, normalized
     func stopRecording() -> [Float] {
-        guard isRecording else {
+        let currentState = state
+        guard currentState == .recording || currentState == .recordingFromMonitoring else {
             logWarning("Not recording")
             return []
         }
 
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        isRecording = false
+        state = currentState == .recordingFromMonitoring ? .monitoring : .idle
 
         stateLock.lock()
         let samples = audioBuffer
@@ -342,11 +348,12 @@ final class AudioRecorder: @unchecked Sendable {
 
     /// Cancel recording without returning data
     func cancelRecording() {
-        guard isRecording else { return }
+        let currentState = state
+        guard currentState == .recording || currentState == .recordingFromMonitoring else { return }
 
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        isRecording = false
+        state = currentState == .recordingFromMonitoring ? .monitoring : .idle
 
         stateLock.lock()
         audioBuffer.removeAll()
@@ -360,7 +367,7 @@ final class AudioRecorder: @unchecked Sendable {
     /// Start continuous audio monitoring without recording
     /// Audio samples are sent to `onMonitoringSamples` callback
     func startMonitoring() throws {
-        guard !isMonitoring && !isRecording else {
+        guard state == .idle else {
             logDebug("Already monitoring or recording")
             return
         }
@@ -383,7 +390,7 @@ final class AudioRecorder: @unchecked Sendable {
         
         do {
             try engine.start()
-            isMonitoring = true
+            state = .monitoring
             logInfo("Audio monitoring started")
         } catch {
             inputNode.removeTap(onBus: 0)
@@ -393,26 +400,26 @@ final class AudioRecorder: @unchecked Sendable {
     
     /// Stop audio monitoring
     func stopMonitoring() {
-        guard isMonitoring else { return }
-        
+        guard state == .monitoring else { return }
+
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        isMonitoring = false
+        state = .idle
         logInfo("Audio monitoring stopped")
     }
     
     /// Pause monitoring (when recording starts)
     func pauseMonitoring() {
-        guard isMonitoring else { return }
+        guard state == .monitoring else { return }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        // Keep isMonitoring true so we know to resume
+        // State stays .monitoring — startRecording() reads it to decide .recordingFromMonitoring
         logDebug("Audio monitoring paused")
     }
     
     /// Resume monitoring (after recording stops)
     func resumeMonitoring() {
-        guard isMonitoring && !isRecording else { return }
+        guard state == .monitoring else { return }
         
         do {
             let inputNode = engine.inputNode
