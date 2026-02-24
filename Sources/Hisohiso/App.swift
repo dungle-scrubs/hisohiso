@@ -233,19 +233,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showCopiedNotification() {
-        // Brief visual feedback that text was copied
-        let alert = NSAlert()
-        alert.messageText = "Copied to Clipboard"
-        alert.informativeText = "The text has been copied. Press ⌘V to paste."
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
+        // Brief non-modal visual feedback that text was copied
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 220, height: 36),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.level = .screenSaver
+        window.collectionBehavior = [.canJoinAllSpaces, .stationary]
+
+        let label = NSTextField(labelWithString: "✓ Copied to clipboard")
+        label.font = .systemFont(ofSize: 13, weight: .medium)
+        label.textColor = .white
+        label.alignment = .center
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 36))
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.85).cgColor
+        container.layer?.cornerRadius = 18
+        label.frame = container.bounds
+        container.addSubview(label)
+        window.contentView = container
+
+        if let screen = NSScreen.main {
+            let x = (screen.frame.width - 220) / 2
+            window.setFrame(NSRect(x: x, y: 120, width: 220, height: 36), display: true)
+        }
+
+        window.orderFrontRegardless()
 
         // Auto-dismiss after 1.5 seconds
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            NSApp.stopModal()
+            window.orderOut(nil)
         }
-
-        alert.runModal()
     }
 
     private func setupDictationController() {
@@ -563,7 +586,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 alert.informativeText = error.localizedDescription
             }
         } else {
-            alert.informativeText = error.localizedDescription
+            alert.informativeText = """
+                Hisohiso encountered an error during setup:
+
+                \(error.localizedDescription)
+
+                Try restarting the app. If the problem persists, check that you have enough disk space for model downloads.
+                """
         }
 
         alert.alertStyle = .warning
@@ -582,7 +611,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 case .microphonePermissionDenied:
                     urlString = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
                 default:
-                    urlString = "x-apple.systempreferences:com.apple.preference.security?Privacy"
+                    // For non-permission errors, don't open System Settings
+                    return
                 }
                 if let url = URL(string: urlString) {
                     NSWorkspace.shared.open(url)
