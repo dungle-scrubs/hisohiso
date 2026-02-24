@@ -38,11 +38,18 @@ Hisohiso requests these permissions on first launch:
 
 ## Installation
 
+### Homebrew
+
+```bash
+brew install dungle-scrubs/hisohiso/hisohiso
+```
+
+Then run `hisohiso` to launch.
+
 ### Download
 
-Grab the latest `.dmg` from
-[GitHub Releases](https://github.com/dungle-scrubs/hisohiso/releases), open
-it, and drag Hisohiso to Applications.
+Grab the latest `.tar.gz` from
+[GitHub Releases](https://github.com/dungle-scrubs/hisohiso/releases).
 
 ### Build from source
 
