@@ -158,8 +158,14 @@ final class HistoryStore {
             logDebug("Predicate search failed, falling back to fuzzy: \(error)")
         }
 
-        // Fall back to in-memory fuzzy matching for typo-tolerant search
+        // Fall back to in-memory fuzzy matching for typo-tolerant search.
+        // Limit to the last 6 months to keep memory usage bounded as history grows.
+        let sixMonthsAgo = Calendar.current.date(byAdding: .month, value: -6, to: Date()) ?? Date.distantPast
+        let fuzzyPredicate = #Predicate<TranscriptionRecord> { record in
+            record.timestamp >= sixMonthsAgo
+        }
         var descriptor = FetchDescriptor<TranscriptionRecord>(
+            predicate: fuzzyPredicate,
             sortBy: [SortDescriptor(\TranscriptionRecord.timestamp, order: .reverse)]
         )
         descriptor.fetchLimit = 500

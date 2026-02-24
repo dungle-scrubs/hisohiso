@@ -11,9 +11,10 @@ final class AudioFeedback {
     }
 
     init() {
-        // Pre-load system sounds for instant playback
-        startSound = NSSound(contentsOfFile: "/System/Library/Sounds/Tink.aiff", byReference: true)
-        stopSound = NSSound(contentsOfFile: "/System/Library/Sounds/Pop.aiff", byReference: true)
+        // Use named sounds to survive system sound path changes across macOS versions.
+        // Falls back to nil (silent) if the sound name is unavailable.
+        startSound = NSSound(named: "Tink")
+        stopSound = NSSound(named: "Pop")
     }
 
     /// Play the start recording sound

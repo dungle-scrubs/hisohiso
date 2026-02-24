@@ -1,7 +1,11 @@
 import Foundation
 import Security
 
-/// Manages secure storage of API keys and sensitive data in macOS Keychain
+/// Manages secure storage of API keys and sensitive data in macOS Keychain.
+///
+/// ## Thread safety
+/// All operations delegate to the Security framework (`SecItem*`), which is
+/// internally thread-safe. This type holds no mutable state of its own.
 final class KeychainManager: @unchecked Sendable {
     static let shared = KeychainManager()
 
