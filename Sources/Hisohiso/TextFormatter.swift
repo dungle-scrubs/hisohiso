@@ -64,7 +64,7 @@ struct TextFormatter {
     // MARK: - Private Helpers
 
     private func removeFillerWords(from text: String) -> String {
-        var result = text.lowercased()
+        var result = text
 
         // Sort by length descending to match longer phrases first
         let sortedFillers = fillerWords.sorted { $0.count > $1.count }

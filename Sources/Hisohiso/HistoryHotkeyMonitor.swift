@@ -3,13 +3,14 @@ import Cocoa
 
 // MARK: - HistoryHotkeyMonitor
 
-/// Monitors for the history palette hotkey (Ctrl+Option+Space by default)
+/// Monitors for the history palette hotkey (Ctrl+Option+Space by default).
+///
+/// Uses the shared `EventTapManager` instead of creating its own CGEventTap.
 final class HistoryHotkeyMonitor {
+    private static let registrationID = "history-hotkey-monitor"
+
     /// Callback when hotkey is pressed
     var onHotkey: (() -> Void)?
-
-    private var eventTap: CFMachPort?
-    private var runLoopSource: CFRunLoopSource?
 
     /// Current hotkey configuration
     private(set) var keyCode: UInt16 = UInt16(kVK_Space)
@@ -25,70 +26,26 @@ final class HistoryHotkeyMonitor {
     /// - Returns: true if monitoring started successfully
     @discardableResult
     func start() -> Bool {
-        guard eventTap == nil else {
-            logWarning("HistoryHotkeyMonitor already running")
-            return true
+        EventTapManager.shared.register(
+            id: Self.registrationID,
+            eventTypes: [.keyDown]
+        ) { [weak self] event, _ in
+            guard let self else { return false }
+            return self.handleKeyDown(event)
         }
 
-        let eventMask = (1 << CGEventType.keyDown.rawValue)
-
-        eventTap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: CGEventMask(eventMask),
-            callback: { _, type, event, refcon -> Unmanaged<CGEvent>? in
-                guard let refcon else { return Unmanaged.passUnretained(event) }
-
-                let monitor = Unmanaged<HistoryHotkeyMonitor>.fromOpaque(refcon).takeUnretainedValue()
-
-                if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-                    if let tap = monitor.eventTap {
-                        CGEvent.tapEnable(tap: tap, enable: true)
-                    }
-                    return Unmanaged.passUnretained(event)
-                }
-
-                if monitor.handleKeyDown(event) {
-                    // Consume the event
-                    return nil
-                }
-
-                return Unmanaged.passUnretained(event)
-            },
-            userInfo: Unmanaged.passUnretained(self).toOpaque()
-        )
-
-        guard let eventTap else {
-            logError("Failed to create event tap for history hotkey")
+        guard EventTapManager.shared.start() else {
+            logError("Failed to start event tap for history hotkey")
             return false
         }
 
-        runLoopSource = CFMachPortCreateRunLoopSource(nil, eventTap, 0)
-
-        if let source = runLoopSource {
-            CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
-        }
-
-        CGEvent.tapEnable(tap: eventTap, enable: true)
-
-        logInfo("HistoryHotkeyMonitor started (Ctrl+Option+Space)")
+        logInfo("HistoryHotkeyMonitor started (\(displayString))")
         return true
     }
 
     /// Stop monitoring
     func stop() {
-        if let tap = eventTap {
-            CGEvent.tapEnable(tap: tap, enable: false)
-        }
-
-        if let source = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
-        }
-
-        eventTap = nil
-        runLoopSource = nil
-
+        EventTapManager.shared.unregister(id: Self.registrationID)
         logInfo("HistoryHotkeyMonitor stopped")
     }
 
@@ -106,22 +63,16 @@ final class HistoryHotkeyMonitor {
 
     private func handleKeyDown(_ event: CGEvent) -> Bool {
         let eventKeyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
-        let eventModifiers = event.flags
-
-        // Check if key code matches
         guard eventKeyCode == keyCode else { return false }
 
-        // Check if required modifiers are pressed
-        // We want exactly these modifiers (with some tolerance for caps lock, etc.)
+        // Check if required modifiers are pressed exactly (with tolerance for caps lock)
         let relevantModifiers: CGEventFlags = [.maskControl, .maskAlternate, .maskCommand, .maskShift]
-        let pressedRelevant = eventModifiers.intersection(relevantModifiers)
+        let pressedRelevant = event.flags.intersection(relevantModifiers)
         let requiredRelevant = modifiers.intersection(relevantModifiers)
-
         guard pressedRelevant == requiredRelevant else { return false }
 
         logDebug("History hotkey triggered")
 
-        // Dispatch to main thread
         DispatchQueue.main.async { [weak self] in
             self?.onHotkey?()
         }
@@ -137,74 +88,13 @@ extension HistoryHotkeyMonitor {
     var displayString: String {
         var parts: [String] = []
 
-        if modifiers.contains(.maskControl) {
-            parts.append("⌃")
-        }
-        if modifiers.contains(.maskAlternate) {
-            parts.append("⌥")
-        }
-        if modifiers.contains(.maskShift) {
-            parts.append("⇧")
-        }
-        if modifiers.contains(.maskCommand) {
-            parts.append("⌘")
-        }
+        if modifiers.contains(.maskControl) { parts.append("⌃") }
+        if modifiers.contains(.maskAlternate) { parts.append("⌥") }
+        if modifiers.contains(.maskShift) { parts.append("⇧") }
+        if modifiers.contains(.maskCommand) { parts.append("⌘") }
 
-        parts.append(keyCodeToString(keyCode))
+        parts.append(KeyCodeUtils.keyCodeToString(keyCode))
 
         return parts.joined()
-    }
-
-    private func keyCodeToString(_ keyCode: UInt16) -> String {
-        switch Int(keyCode) {
-        case kVK_Space: return "Space"
-        case kVK_Return: return "↵"
-        case kVK_Tab: return "⇥"
-        case kVK_Delete: return "⌫"
-        case kVK_Escape: return "⎋"
-        case kVK_UpArrow: return "↑"
-        case kVK_DownArrow: return "↓"
-        case kVK_LeftArrow: return "←"
-        case kVK_RightArrow: return "→"
-        default:
-            // Try to get character from key code
-            if let char = characterForKeyCode(keyCode) {
-                return char.uppercased()
-            }
-            return "Key\(keyCode)"
-        }
-    }
-
-    private func characterForKeyCode(_ keyCode: UInt16) -> String? {
-        let source = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
-        guard let layoutData = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else {
-            return nil
-        }
-
-        let data = unsafeBitCast(layoutData, to: CFData.self) as Data
-        var deadKeyState: UInt32 = 0
-        var chars = [UniChar](repeating: 0, count: 4)
-        var length = 0
-
-        let result = data.withUnsafeBytes { ptr -> OSStatus in
-            guard let layoutPtr = ptr.baseAddress?.assumingMemoryBound(to: UCKeyboardLayout.self) else {
-                return errSecParam
-            }
-            return UCKeyTranslate(
-                layoutPtr,
-                keyCode,
-                UInt16(kUCKeyActionDown),
-                0,
-                UInt32(LMGetKbdType()),
-                UInt32(kUCKeyTranslateNoDeadKeysBit),
-                &deadKeyState,
-                chars.count,
-                &length,
-                &chars
-            )
-        }
-
-        guard result == noErr, length > 0 else { return nil }
-        return String(utf16CodeUnits: chars, count: length)
     }
 }

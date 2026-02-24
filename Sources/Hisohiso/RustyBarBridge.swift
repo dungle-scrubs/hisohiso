@@ -7,8 +7,14 @@ final class SinewBridge: @unchecked Sendable {
     private let moduleID = "hisohiso"
     private let queue = DispatchQueue(label: "com.hisohiso.sinew", qos: .utility)
 
-    /// Whether Sinew is available (socket exists)
-    private(set) var isAvailable = false
+    /// Whether Sinew is available (socket exists).
+    /// Protected by `queue` — use `isAvailable` computed property for thread-safe reads.
+    private var _isAvailable = false
+
+    /// Thread-safe check for Sinew availability.
+    var isAvailable: Bool {
+        queue.sync { _isAvailable }
+    }
 
     /// Unix socket path for Sinew IPC.
     private var socketPath: String {
@@ -100,9 +106,9 @@ final class SinewBridge: @unchecked Sendable {
     func checkAvailability() {
         queue.async { [weak self] in
             guard let self else { return }
-            self.isAvailable = FileManager.default.fileExists(atPath: self.socketPath)
+            self._isAvailable = FileManager.default.fileExists(atPath: self.socketPath)
 
-            if self.isAvailable {
+            if self._isAvailable {
                 logDebug("Sinew socket available at \(self.socketPath)")
             }
         }
@@ -114,10 +120,10 @@ final class SinewBridge: @unchecked Sendable {
         queue.async { [weak self] in
             guard let self else { return }
 
-            if !self.isAvailable {
-                self.isAvailable = FileManager.default.fileExists(atPath: self.socketPath)
+            if !self._isAvailable {
+                self._isAvailable = FileManager.default.fileExists(atPath: self.socketPath)
             }
-            guard self.isAvailable else { return }
+            guard self._isAvailable else { return }
 
             let socket = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
             guard socket >= 0 else {
@@ -142,7 +148,7 @@ final class SinewBridge: @unchecked Sendable {
 
             guard connectResult == 0 else {
                 logDebug("Sinew: Failed to connect")
-                self.isAvailable = false
+                self._isAvailable = false
                 return
             }
 

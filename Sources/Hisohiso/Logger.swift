@@ -79,15 +79,13 @@ final class Logger: @unchecked Sendable {
         // Write to OSLog
         os_log("%{public}@", log: osLog, type: level.osLogType, message)
 
-        // Write to file (for Claude Code tail)
-        #if DEBUG
+        // Write to file for on-device troubleshooting
         queue.async { [weak self] in
             if let data = logLine.data(using: .utf8) {
                 self?.fileHandle?.write(data)
                 try? self?.fileHandle?.synchronize()
             }
         }
-        #endif
     }
 
     /// Path to the current log file (for tail -f)

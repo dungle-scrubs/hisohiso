@@ -981,11 +981,3 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
         super.close()
     }
 }
-
-// MARK: - Notifications
-
-extension Notification.Name {
-    static let wakeWordSettingsChanged = Notification.Name("wakeWordSettingsChanged")
-    static let modelSelectionChanged = Notification.Name("modelSelectionChanged")
-    static let audioInputDeviceChanged = Notification.Name("audioInputDeviceChanged")
-}

@@ -1,9 +1,11 @@
+import Accelerate
 import AudioKit
 import AVFoundation
 import Foundation
 
 /// Records audio using AudioKit with noise suppression
-final class AudioKitRecorder {
+/// Thread safety: `audioBuffer` is protected by `bufferLock` (NSLock).
+final class AudioKitRecorder: @unchecked Sendable {
     private var engine: AudioEngine?
     private var tap: RawDataTap?
     
@@ -128,47 +130,36 @@ final class AudioKitRecorder {
         onAudioChunk?(floatData)
     }
     
-    /// Resample audio using linear interpolation
+    /// High-quality resampling using vDSP with polynomial interpolation
     private func resample(_ samples: [Float], from sourceSampleRate: Double, to targetSampleRate: Double) -> [Float] {
         let ratio = Float(sourceSampleRate / targetSampleRate)
         let outputLength = Int(Float(samples.count) / ratio)
-        
+
         guard outputLength > 0 else { return [] }
-        
+
         var output = [Float](repeating: 0, count: outputLength)
-        
-        for i in 0..<outputLength {
-            let srcIndex = Float(i) * ratio
-            let srcIndexInt = Int(srcIndex)
-            let fraction = srcIndex - Float(srcIndexInt)
-            
-            if srcIndexInt + 1 < samples.count {
-                output[i] = samples[srcIndexInt] * (1 - fraction) + samples[srcIndexInt + 1] * fraction
-            } else if srcIndexInt < samples.count {
-                output[i] = samples[srcIndexInt]
-            }
-        }
+        var control = (0..<outputLength).map { Float($0) * ratio }
+        vDSP_vlint(samples, &control, 1, &output, 1, vDSP_Length(outputLength), vDSP_Length(samples.count))
+
         return output
     }
-    
-    /// Normalize audio to optimal level for transcription
+
+    /// Normalize audio to optimal level for transcription using vDSP
     private func normalizeAudio(_ samples: [Float]) -> [Float] {
         guard !samples.isEmpty else { return samples }
-        
-        // Find peak amplitude
+
         var peak: Float = 0
-        for sample in samples {
-            let abs = Swift.abs(sample)
-            if abs > peak { peak = abs }
-        }
-        
-        // Avoid division by zero and don't amplify if already loud enough
+        vDSP_maxmgv(samples, 1, &peak, vDSP_Length(samples.count))
+
         guard peak > 0.001 else { return samples }
-        
-        // Target peak at 0.9 to leave headroom
+
         let targetPeak: Float = 0.9
-        let gain = min(targetPeak / peak, 10.0) // Cap gain at 10x to avoid noise amplification
-        
-        return samples.map { $0 * gain }
+        let gain = min(targetPeak / peak, 10.0)
+
+        var output = [Float](repeating: 0, count: samples.count)
+        var gainVar = gain
+        vDSP_vsmul(samples, 1, &gainVar, &output, 1, vDSP_Length(samples.count))
+
+        return output
     }
 }

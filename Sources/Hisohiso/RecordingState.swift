@@ -7,19 +7,6 @@ enum RecordingState: Equatable {
     case transcribing
     case error(message: String)
 
-    static func == (lhs: RecordingState, rhs: RecordingState) -> Bool {
-        switch (lhs, rhs) {
-        case (.idle, .idle),
-             (.recording, .recording),
-             (.transcribing, .transcribing):
-            return true
-        case (.error(let a), .error(let b)):
-            return a == b
-        default:
-            return false
-        }
-    }
-    
     var displayText: String {
         switch self {
         case .idle: return ""

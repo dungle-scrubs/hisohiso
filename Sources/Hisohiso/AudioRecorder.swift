@@ -46,7 +46,9 @@ enum AudioRecorderError: Error, LocalizedError {
 }
 
 /// Records audio from the system default input device using AVAudioEngine
-final class AudioRecorder {
+/// Thread safety: `audioBuffer` is protected by `bufferLock` (NSLock).
+/// Audio tap callbacks run on the audio render thread; public API is called from `@MainActor`.
+final class AudioRecorder: @unchecked Sendable {
     private let engine = AVAudioEngine()
     private var audioBuffer: [Float] = []
     private let bufferLock = NSLock()
