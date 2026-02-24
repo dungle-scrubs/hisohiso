@@ -139,12 +139,30 @@ final class HistoryStore {
 
         let lowercasedQuery = query.lowercased()
 
-        // Fetch all and filter in memory for fuzzy matching
-        // SwiftData predicates don't support fuzzy search well
+        // Try predicate-based substring search first (efficient for exact matches)
+        do {
+            let predicate = #Predicate<TranscriptionRecord> { record in
+                record.text.localizedStandardContains(query)
+            }
+            var descriptor = FetchDescriptor<TranscriptionRecord>(
+                predicate: predicate,
+                sortBy: [SortDescriptor(\TranscriptionRecord.timestamp, order: .reverse)]
+            )
+            descriptor.fetchLimit = 50
+
+            let predicateResults = try context.fetch(descriptor)
+            if !predicateResults.isEmpty {
+                return predicateResults
+            }
+        } catch {
+            logDebug("Predicate search failed, falling back to fuzzy: \(error)")
+        }
+
+        // Fall back to in-memory fuzzy matching for typo-tolerant search
         var descriptor = FetchDescriptor<TranscriptionRecord>(
-            sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
+            sortBy: [SortDescriptor(\TranscriptionRecord.timestamp, order: .reverse)]
         )
-        descriptor.fetchLimit = 500 // Reasonable upper bound
+        descriptor.fetchLimit = 500
 
         do {
             let allRecords = try context.fetch(descriptor)

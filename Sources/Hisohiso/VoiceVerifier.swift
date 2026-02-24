@@ -125,14 +125,13 @@ final class VoiceVerifier {
         }
 
         // Try common dev paths
+        // Paths relative to the working directory (for dev builds run via `swift run`)
         let devPaths = [
             URL(fileURLWithPath: "Resources/SpeakerEmbedding.mlpackage"),
             URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
                 .deletingLastPathComponent()
                 .deletingLastPathComponent()
-                .appendingPathComponent("Resources/SpeakerEmbedding.mlpackage"),
-            URL(fileURLWithPath: NSHomeDirectory())
-                .appendingPathComponent("dev/hisohiso/Resources/SpeakerEmbedding.mlpackage")
+                .appendingPathComponent("Resources/SpeakerEmbedding.mlpackage")
         ]
 
         for path in devPaths {
