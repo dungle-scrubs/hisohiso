@@ -84,9 +84,11 @@ final class AudioKitRecorder: @unchecked Sendable {
         } else {
             resampledSamples = samples
         }
-        
-        // Normalize
-        let normalizedSamples = normalizeAudio(resampledSamples)
+
+        // Noise-handling pipeline: high-pass filter → trim silence → normalize
+        let filtered = AudioDSP.highPassFilter(resampledSamples)
+        let trimmed = AudioDSP.trimSilence(filtered)
+        let normalizedSamples = AudioDSP.normalize(trimmed)
         
         logInfo("AudioKit recording stopped, captured \(samples.count) samples (\(Double(normalizedSamples.count) / targetSampleRate) seconds)")
         return normalizedSamples

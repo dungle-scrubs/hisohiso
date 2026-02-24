@@ -291,26 +291,25 @@ final class AudioRecorder: @unchecked Sendable {
             logInfo("Monitoring paused for recording")
         }
 
-        // Apply selected device before getting input format
+        // No VPIO — it adds ~1.5s latency per recording start and corrupts
+        // the audio unit state when toggling between monitoring/recording.
+        // Noise handling is done post-capture via the DSP pipeline instead
+        // (high-pass filter + VAD silence trimming + normalization).
         try applySelectedDevice()
 
         let inputNode = engine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
+        let (tapFormat, sampleRate) = try monoTapFormat()
 
-        guard inputFormat.sampleRate > 0 else {
-            throw AudioRecorderError.noInputNode
-        }
-
-        logInfo("Starting recording at \(inputFormat.sampleRate)Hz, \(inputFormat.channelCount) channels")
+        logInfo("Recording at \(sampleRate)Hz")
 
         // Clear previous buffer
         stateLock.lock()
         audioBuffer.removeAll()
         stateLock.unlock()
 
-        // Install tap on input node
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
-            self?.processAudioBuffer(buffer, inputSampleRate: inputFormat.sampleRate)
+        // Install tap with explicit mono format
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: tapFormat) { [weak self] buffer, _ in
+            self?.processAudioBuffer(buffer, inputSampleRate: sampleRate)
         }
 
         do {
@@ -321,6 +320,26 @@ final class AudioRecorder: @unchecked Sendable {
             inputNode.removeTap(onBus: 0)
             throw AudioRecorderError.engineStartFailed(error)
         }
+    }
+
+    /// Create an explicit mono Float32 format at the hardware sample rate.
+    /// VPIO can report unusual channel counts; a mono tap format avoids this.
+    /// - Returns: Tuple of (tap format, sample rate).
+    /// - Throws: `AudioRecorderError.noInputNode` if no valid sample rate.
+    private func monoTapFormat() throws -> (AVAudioFormat, Double) {
+        let hardwareFormat = engine.inputNode.outputFormat(forBus: 0)
+        let sampleRate = hardwareFormat.sampleRate > 0 ? hardwareFormat.sampleRate : 48000
+
+        guard let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sampleRate,
+            channels: 1,
+            interleaved: false
+        ) else {
+            throw AudioRecorderError.noInputNode
+        }
+
+        return (format, sampleRate)
     }
 
     /// Stop recording and return the captured audio.
@@ -341,10 +360,15 @@ final class AudioRecorder: @unchecked Sendable {
         audioBuffer.removeAll()
         stateLock.unlock()
 
-        // Normalize audio levels for better transcription
-        let normalizedSamples = normalizeAudio(samples)
+        // Noise-handling pipeline: high-pass filter → trim silence → normalize.
+        // Voice processing (VPIO) already cleaned the signal during capture;
+        // these post-processing steps remove residual sub-bass rumble and
+        // trim leading/trailing silence to prevent model hallucinations.
+        let filtered = AudioDSP.highPassFilter(samples)
+        let trimmed = AudioDSP.trimSilence(filtered)
+        let normalizedSamples = AudioDSP.normalize(trimmed)
 
-        logInfo("Recording stopped, captured \(samples.count) samples (\(Double(samples.count) / targetSampleRate) seconds)")
+        logInfo("Recording stopped: \(samples.count) raw → \(normalizedSamples.count) processed samples (\(String(format: "%.1f", Double(normalizedSamples.count) / targetSampleRate))s)")
         return normalizedSamples
     }
 
@@ -376,19 +400,14 @@ final class AudioRecorder: @unchecked Sendable {
         }
         
         try applySelectedDevice()
-        
-        let inputNode = engine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
-        
-        guard inputFormat.sampleRate > 0 else {
-            throw AudioRecorderError.noInputNode
-        }
-        
-        logInfo("Starting audio monitoring at \(inputFormat.sampleRate)Hz")
-        
+
+        let (tapFormat, tapSampleRate) = try monoTapFormat()
+
+        logInfo("Starting audio monitoring at \(tapSampleRate)Hz")
+
         // Install tap for monitoring
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
-            self?.processMonitoringBuffer(buffer, sampleRate: inputFormat.sampleRate)
+        engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: tapFormat) { [weak self] buffer, _ in
+            self?.processMonitoringBuffer(buffer, sampleRate: tapSampleRate)
         }
         
         do {
@@ -396,7 +415,7 @@ final class AudioRecorder: @unchecked Sendable {
             state = .monitoring
             logInfo("Audio monitoring started")
         } catch {
-            inputNode.removeTap(onBus: 0)
+            engine.inputNode.removeTap(onBus: 0)
             throw AudioRecorderError.engineStartFailed(error)
         }
     }
@@ -423,15 +442,14 @@ final class AudioRecorder: @unchecked Sendable {
     /// Resume monitoring (after recording stops)
     func resumeMonitoring() {
         guard state == .monitoring else { return }
-        
+
         do {
-            let inputNode = engine.inputNode
-            let inputFormat = inputNode.outputFormat(forBus: 0)
-            
-            inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
-                self?.processMonitoringBuffer(buffer, sampleRate: inputFormat.sampleRate)
+            let (tapFormat, tapSampleRate) = try monoTapFormat()
+
+            engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: tapFormat) { [weak self] buffer, _ in
+                self?.processMonitoringBuffer(buffer, sampleRate: tapSampleRate)
             }
-            
+
             try engine.start()
             logDebug("Audio monitoring resumed")
         } catch {
