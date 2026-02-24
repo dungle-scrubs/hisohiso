@@ -10,7 +10,7 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
     // General tab controls
     private var audioFeedbackToggle: NSButton!
     private var launchAtLoginToggle: NSButton!
-    private var rustyBarToggle: NSButton!
+    private var sinewToggle: NSButton!
     private let supportsLaunchAtLogin = Bundle.main.bundleURL.pathExtension == "app"
     private var floatingPillToggle: NSButton!
     private var microphonePopup: NSPopUpButton!
@@ -167,9 +167,9 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
         view.addSubview(floatingPillToggle)
         y -= 26
 
-        rustyBarToggle = NSButton(checkboxWithTitle: "Show in Sinew", target: self, action: #selector(rustyBarToggleChanged))
-        rustyBarToggle.frame = NSRect(x: 20, y: y, width: 400, height: 20)
-        view.addSubview(rustyBarToggle)
+        sinewToggle = NSButton(checkboxWithTitle: "Show in Sinew", target: self, action: #selector(sinewToggleChanged))
+        sinewToggle.frame = NSRect(x: 20, y: y, width: 400, height: 20)
+        view.addSubview(sinewToggle)
         y -= 22
 
         let sinewStatus = NSTextField(labelWithString: SinewBridge.shared.isAvailable ? "✓ Sinew detected" : "Sinew not running")
@@ -626,8 +626,8 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
         audioFeedbackToggle.state = defaults.object(forKey: "audioFeedbackEnabled") as? Bool ?? true ? .on : .off
         launchAtLoginToggle.state = supportsLaunchAtLogin && SMAppService.mainApp.status == .enabled ? .on : .off
         floatingPillToggle.state = SinewBridge.shared.showFloatingPill ? .on : .off
-        rustyBarToggle.state = SinewBridge.shared.useSinewVisualization ? .on : .off
-        rustyBarToggle.isEnabled = SinewBridge.shared.isAvailable
+        sinewToggle.state = SinewBridge.shared.useSinewVisualization ? .on : .off
+        sinewToggle.isEnabled = SinewBridge.shared.isAvailable
         useAudioKitToggle.state = defaults.bool(forKey: "useAudioKit") ? .on : .off
 
         // Model
@@ -763,9 +763,9 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
         }
     }
 
-    @objc private func rustyBarToggleChanged() {
-        SinewBridge.shared.useSinewVisualization = rustyBarToggle.state == .on
-        logInfo("Sinew visualization: \(rustyBarToggle.state == .on)")
+    @objc private func sinewToggleChanged() {
+        SinewBridge.shared.useSinewVisualization = sinewToggle.state == .on
+        logInfo("Sinew visualization: \(sinewToggle.state == .on)")
     }
 
     @objc private func modelChanged() {
