@@ -392,13 +392,11 @@ final class DictationController: ObservableObject {
         // Voice verification (if enabled)
         if VoiceVerifier.shared.isEnabled, VoiceVerifier.shared.isEnrolled {
             do {
-                let verificationResult = try VoiceVerifier.shared.verify(audioSamples: audioSamples)
+                let verificationResult = try await VoiceVerifier.shared.verify(audioSamples: audioSamples)
                 if !verificationResult.isMatch {
                     logInfo("Voice verification failed (similarity: \(String(format: "%.2f", verificationResult.similarity)))")
                     stateManager.setIdle()
                     sinewBridge.sendState(.idle)
-                    // Optionally show brief feedback
-                    // Could show "Voice not recognized" but keeping it silent for now
                     return
                 }
                 logDebug("Voice verified (similarity: \(String(format: "%.2f", verificationResult.similarity)))")
@@ -451,21 +449,40 @@ final class DictationController: ObservableObject {
     }
 
     #if DEBUG
-    /// Save audio samples to file for debugging
+    /// Maximum number of debug audio files to keep.
+    private static let maxDebugAudioFiles = 10
+
+    /// Save audio samples to file for debugging, pruning old files.
     private func saveDebugAudio(_ samples: [Float]) {
+        let debugDir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("hisohiso-debug")
+        try? FileManager.default.createDirectory(at: debugDir, withIntermediateDirectories: true)
+
         let timestamp = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
-        let path = "/tmp/hisohiso-debug-\(timestamp).raw"
-        
+        let path = debugDir.appendingPathComponent("\(timestamp).raw")
+
         let data = samples.withUnsafeBufferPointer { buffer in
             Data(buffer: buffer)
         }
-        
+
         do {
-            try data.write(to: URL(fileURLWithPath: path))
-            logInfo("Debug audio saved to \(path) (\(samples.count) samples)")
+            try data.write(to: path)
+            logInfo("Debug audio saved to \(path.path) (\(samples.count) samples)")
+            pruneDebugAudio(in: debugDir)
         } catch {
             logError("Failed to save debug audio: \(error)")
+        }
+    }
+
+    /// Keep only the most recent debug audio files.
+    private func pruneDebugAudio(in directory: URL) {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey])
+            .sorted(by: { ($0.lastPathComponent) > ($1.lastPathComponent) })
+        else { return }
+
+        for file in files.dropFirst(Self.maxDebugAudioFiles) {
+            try? fm.removeItem(at: file)
         }
     }
     #endif

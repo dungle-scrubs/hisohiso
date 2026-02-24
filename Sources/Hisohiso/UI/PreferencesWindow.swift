@@ -44,6 +44,8 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
     private var enrollmentProgressLabel: NSTextField!
     private var enrollmentSamples: [[Float]] = []
     private var isRecordingEnrollment = false
+    /// Reused across enrollment samples to avoid creating multiple AVAudioEngine instances.
+    private var enrollmentRecorder: AudioRecorder?
 
     // Wake word tab controls
     private var wakeWordToggle: NSButton!
@@ -888,21 +890,18 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
     private func beginEnrollment() {
         enrollmentSamples = []
         isRecordingEnrollment = true
+        enrollmentRecorder = AudioRecorder()
         voiceEnrollButton.title = "Stop Recording"
         voiceClearButton.isEnabled = false
         enrollmentProgressLabel.stringValue = "🎤 Speak naturally for 5-10 seconds... (0 samples)"
         enrollmentProgressLabel.textColor = .systemRed
 
-        // Start recording using AudioRecorder
-        // We'll collect samples and then enroll
         collectEnrollmentSample()
     }
 
     private func collectEnrollmentSample() {
-        guard isRecordingEnrollment else { return }
+        guard isRecordingEnrollment, let recorder = enrollmentRecorder else { return }
 
-        // Use a temporary audio recorder for enrollment
-        let recorder = AudioRecorder()
         do {
             try recorder.startRecording()
 
@@ -920,7 +919,6 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
                 if self.enrollmentSamples.count < 3 {
                     self.collectEnrollmentSample()
                 } else {
-                    // Auto-stop after 3 good samples
                     self.stopEnrollmentRecording()
                 }
             }
@@ -929,12 +927,14 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
             enrollmentProgressLabel.stringValue = "✗ Failed to access microphone"
             enrollmentProgressLabel.textColor = .systemRed
             isRecordingEnrollment = false
+            enrollmentRecorder = nil
             voiceEnrollButton.title = "Start Enrollment"
         }
     }
 
     private func stopEnrollmentRecording() {
         isRecordingEnrollment = false
+        enrollmentRecorder = nil
         voiceEnrollButton.title = "Processing..."
         voiceEnrollButton.isEnabled = false
 
@@ -949,7 +949,7 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
         // Enroll with collected samples
         Task { @MainActor in
             do {
-                try VoiceVerifier.shared.enroll(with: enrollmentSamples)
+                try await VoiceVerifier.shared.enroll(with: enrollmentSamples)
                 enrollmentProgressLabel.stringValue = "✓ Enrollment complete!"
                 enrollmentProgressLabel.textColor = .systemGreen
                 updateVoiceStatus()
@@ -976,6 +976,8 @@ final class PreferencesWindow: NSWindow, NSTabViewDelegate {
     override func close() {
         // Stop any ongoing enrollment
         isRecordingEnrollment = false
+        enrollmentRecorder?.cancelRecording()
+        enrollmentRecorder = nil
 
         NSApp.setActivationPolicy(.accessory)
         super.close()

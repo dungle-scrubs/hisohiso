@@ -19,10 +19,18 @@ final class WakeWordManager: ObservableObject {
     /// Whether currently listening for wake word
     @Published private(set) var isListening = false
 
-    /// The configured wake phrase (e.g., "hey kevin", "computer")
+    /// The configured wake phrase (e.g., "hey kevin", "computer").
+    /// Empty or whitespace-only values are rejected to prevent false activations.
     var wakePhrase: String {
         get { UserDefaults.standard.string(forKey: "wakePhrase") ?? "hey hisohiso" }
-        set { UserDefaults.standard.set(newValue.lowercased().trimmingCharacters(in: .whitespaces), forKey: "wakePhrase") }
+        set {
+            let trimmed = newValue.lowercased().trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else {
+                logWarning("WakeWordManager: Rejecting empty wake phrase")
+                return
+            }
+            UserDefaults.standard.set(trimmed, forKey: "wakePhrase")
+        }
     }
 
     /// Callback when wake word is detected
@@ -108,13 +116,20 @@ final class WakeWordManager: ObservableObject {
         logDebug("WakeWordManager: Resumed")
     }
 
-    /// Feed audio samples from AudioRecorder's monitoring tap
-    /// - Parameters:
-    ///   - samples: Audio samples (should be 16kHz mono)
-    ///   - sampleRate: Sample rate of the audio
-    func processAudioSamples(_ samples: [Float], sampleRate: Double) {
-        guard isListening else { return }
+    /// Feed audio samples from AudioRecorder's monitoring tap.
+    ///
+    /// Called from the audio render thread. Dispatches to MainActor since
+    /// this type is `@MainActor`-isolated and accesses `@Published` properties.
+    nonisolated func processAudioSamples(_ samples: [Float], sampleRate: Double) {
         guard !samples.isEmpty else { return }
+        Task { @MainActor [weak self] in
+            self?.processAudioSamplesOnMain(samples, sampleRate: sampleRate)
+        }
+    }
+
+    /// Actual processing on MainActor.
+    private func processAudioSamplesOnMain(_ samples: [Float], sampleRate: Double) {
+        guard isListening else { return }
 
         // Resample to 16kHz if needed
         let resampled: [Float]

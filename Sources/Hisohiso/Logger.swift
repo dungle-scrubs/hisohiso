@@ -21,6 +21,12 @@ enum LogLevel: String {
 
 // MARK: - Logger
 
+/// File + OSLog logger.
+///
+/// ## Thread safety
+/// All mutable state (`fileHandle`) is accessed exclusively on `queue`.
+/// The `ISO8601DateFormatter` used for timestamps is thread-safe (unlike `DateFormatter`).
+/// Free functions (`logInfo`, `logError`, …) may be called from any thread.
 final class Logger: @unchecked Sendable {
     static let shared = Logger()
 
@@ -29,11 +35,8 @@ final class Logger: @unchecked Sendable {
     private let logFileURL: URL
     private let queue = DispatchQueue(label: "com.hisohiso.logger", qos: .utility)
 
-    private let dateFormatter: DateFormatter = {
-        let df = DateFormatter()
-        df.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
-        return df
-    }()
+    /// Maximum age (in days) for log files before automatic cleanup.
+    private let maxLogAgeDays = 14
 
     private init() {
         // Create log directory
@@ -52,13 +55,16 @@ final class Logger: @unchecked Sendable {
         }
         fileHandle = try? FileHandle(forWritingTo: logFileURL)
         fileHandle?.seekToEndOfFile()
+
+        // Prune old log files on startup
+        pruneOldLogs(in: logsDir)
     }
 
     deinit {
         try? fileHandle?.close()
     }
 
-    /// Log a message with the specified level
+    /// Log a message with the specified level.
     /// - Parameters:
     ///   - message: The message to log
     ///   - level: Log level (debug, info, warning, error)
@@ -73,14 +79,19 @@ final class Logger: @unchecked Sendable {
         line: Int = #line
     ) {
         let fileName = URL(fileURLWithPath: file).lastPathComponent
-        let timestamp = dateFormatter.string(from: Date())
-        let logLine = "[\(timestamp)] [\(level.rawValue)] [\(fileName):\(line)] \(function) - \(message)\n"
 
-        // Write to OSLog
+        // Write to OSLog (thread-safe by design)
         os_log("%{public}@", log: osLog, type: level.osLogType, message)
 
-        // Write to file for on-device troubleshooting
+        // Build the log line and write to file on the serial queue.
+        // ISO8601DateFormatter is thread-safe, but we do all formatting on
+        // the queue to avoid any contention and keep writes ordered.
         queue.async { [weak self] in
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withFullDate, .withFullTime, .withFractionalSeconds]
+            let timestamp = formatter.string(from: Date())
+            let logLine = "[\(timestamp)] [\(level.rawValue)] [\(fileName):\(line)] \(function) - \(message)\n"
+
             if let data = logLine.data(using: .utf8) {
                 self?.fileHandle?.write(data)
                 try? self?.fileHandle?.synchronize()
@@ -90,6 +101,27 @@ final class Logger: @unchecked Sendable {
 
     /// Path to the current log file (for tail -f)
     var logFilePath: String { logFileURL.path }
+
+    // MARK: - Log Rotation
+
+    /// Remove log files older than `maxLogAgeDays`.
+    private func pruneOldLogs(in directory: URL) {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey]) else {
+            return
+        }
+
+        let cutoff = Calendar.current.date(byAdding: .day, value: -maxLogAgeDays, to: Date()) ?? Date()
+
+        for file in files where file.lastPathComponent.hasPrefix("hisohiso-") && file.pathExtension == "log" {
+            guard let attrs = try? fm.attributesOfItem(atPath: file.path),
+                  let creationDate = attrs[.creationDate] as? Date,
+                  creationDate < cutoff
+            else { continue }
+
+            try? fm.removeItem(at: file)
+        }
+    }
 }
 
 // MARK: - Convenience Functions

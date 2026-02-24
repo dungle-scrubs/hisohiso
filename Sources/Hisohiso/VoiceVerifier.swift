@@ -1,11 +1,14 @@
 import Accelerate
-import CoreML
+@preconcurrency import CoreML
 import Foundation
 
-/// Speaker verification using CoreML embedding model (Resemblyzer)
-/// Compares voice embeddings to determine if the speaker matches the enrolled user
-@MainActor
-final class VoiceVerifier {
+/// Speaker verification using CoreML embedding model (Resemblyzer).
+/// Compares voice embeddings to determine if the speaker matches the enrolled user.
+///
+/// Uses a dedicated actor to keep heavy DSP (mel spectrogram, FFT) and CoreML inference
+/// off the main thread. UI-facing properties (`isEnabled`, `threshold`) are backed by
+/// UserDefaults which is thread-safe for atomic reads/writes.
+final class VoiceVerifier: @unchecked Sendable {
     /// Shared instance
     static let shared = VoiceVerifier()
 
@@ -34,13 +37,21 @@ final class VoiceVerifier {
     /// Mel filterbank matrix (precomputed)
     private var melFilterbank: [[Float]]?
 
-    /// Verification threshold (0.0 - 1.0, higher = stricter)
+    /// Serial queue for heavy compute (FFT, mel spectrogram, CoreML inference).
+    private let computeQueue = DispatchQueue(label: "com.hisohiso.voice-verifier", qos: .userInitiated)
+
+    /// Protects `model` and `enrolledEmbedding` for thread-safe reads.
+    private let lock = NSLock()
+
+    /// Verification threshold (0.0 - 1.0, higher = stricter).
+    /// Backed by UserDefaults (atomic for simple types).
     var threshold: Float {
         get { Float(UserDefaults.standard.double(forKey: "voiceVerificationThreshold")) }
         set { UserDefaults.standard.set(Double(newValue), forKey: "voiceVerificationThreshold") }
     }
 
-    /// Whether verification is enabled
+    /// Whether verification is enabled.
+    /// Backed by UserDefaults (atomic for simple types).
     var isEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: "voiceVerificationEnabled") }
         set { UserDefaults.standard.set(newValue, forKey: "voiceVerificationEnabled") }
@@ -48,7 +59,7 @@ final class VoiceVerifier {
 
     /// Whether a voice is enrolled
     var isEnrolled: Bool {
-        enrolledEmbedding != nil
+        lock.withLock { enrolledEmbedding != nil }
     }
 
     private init() {
@@ -234,11 +245,13 @@ final class VoiceVerifier {
 
     // MARK: - Embedding Generation
 
-    /// Generate speaker embedding from audio samples
+    /// Generate speaker embedding from audio samples.
+    /// Runs heavy DSP and CoreML inference on a background queue.
     /// - Parameter audioSamples: Audio samples at 16kHz mono (needs 2+ seconds)
     /// - Returns: 256-dimensional embedding vector
-    func generateEmbedding(from audioSamples: [Float]) throws -> [Float] {
-        guard let model else {
+    func generateEmbedding(from audioSamples: [Float]) async throws -> [Float] {
+        let capturedModel = lock.withLock { model }
+        guard let capturedModel else {
             throw VoiceVerifierError.modelNotLoaded
         }
 
@@ -249,51 +262,68 @@ final class VoiceVerifier {
             )
         }
 
-        // Compute mel spectrogram
-        guard let melSpec = computeMelSpectrogram(from: audioSamples) else {
-            throw VoiceVerifierError.melComputationFailed
-        }
+        // Run heavy DSP + CoreML inference off the main thread
+        return try await withCheckedThrowingContinuation { continuation in
+            computeQueue.async { [self] in
+                do {
+                    // Compute mel spectrogram
+                    guard let melSpec = computeMelSpectrogram(from: audioSamples) else {
+                        continuation.resume(throwing: VoiceVerifierError.melComputationFailed)
+                        return
+                    }
 
-        // We need exactly partialFrames (160) frames for the model
-        let partialFrames = Self.partialFrames
-        guard melSpec.count >= partialFrames else {
-            throw VoiceVerifierError.insufficientAudio(
-                required: partialFrames * Self.hopLength,
-                provided: audioSamples.count
-            )
-        }
+                    // We need exactly partialFrames (160) frames for the model
+                    let partialFrames = Self.partialFrames
+                    guard melSpec.count >= partialFrames else {
+                        continuation.resume(throwing: VoiceVerifierError.insufficientAudio(
+                            required: partialFrames * Self.hopLength,
+                            provided: audioSamples.count
+                        ))
+                        return
+                    }
 
-        // Take a slice from the middle for better quality
-        let startFrame = (melSpec.count - partialFrames) / 2
-        let melSlice = Array(melSpec[startFrame ..< startFrame + partialFrames])
+                    // Take a slice from the middle for better quality
+                    let startFrame = (melSpec.count - partialFrames) / 2
+                    let melSlice = Array(melSpec[startFrame ..< startFrame + partialFrames])
 
-        // Create MLMultiArray for input: (1, 160, 40)
-        let inputArray = try MLMultiArray(shape: [1, NSNumber(value: partialFrames), NSNumber(value: Self.nMels)], dataType: .float32)
-        for (frameIdx, frame) in melSlice.enumerated() {
-            for (melIdx, value) in frame.enumerated() {
-                let index = frameIdx * Self.nMels + melIdx
-                inputArray[index] = NSNumber(value: value)
+                    // Create MLMultiArray for input: (1, 160, 40)
+                    let inputArray = try MLMultiArray(
+                        shape: [1, NSNumber(value: partialFrames), NSNumber(value: Self.nMels)],
+                        dataType: .float32
+                    )
+                    for (frameIdx, frame) in melSlice.enumerated() {
+                        for (melIdx, value) in frame.enumerated() {
+                            let index = frameIdx * Self.nMels + melIdx
+                            inputArray[index] = NSNumber(value: value)
+                        }
+                    }
+
+                    // Create feature provider
+                    let inputFeatures = try MLDictionaryFeatureProvider(
+                        dictionary: ["mel_spectrogram": inputArray]
+                    )
+
+                    // Run inference
+                    let output = try capturedModel.prediction(from: inputFeatures)
+
+                    // Extract embedding
+                    guard let embeddingArray = output.featureValue(for: "embedding")?.multiArrayValue else {
+                        continuation.resume(throwing: VoiceVerifierError.invalidOutput)
+                        return
+                    }
+
+                    // Convert to Float array
+                    var embedding = [Float](repeating: 0, count: Self.embeddingDimension)
+                    for i in 0 ..< Self.embeddingDimension {
+                        embedding[i] = embeddingArray[i].floatValue
+                    }
+
+                    continuation.resume(returning: embedding)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
             }
         }
-
-        // Create feature provider
-        let inputFeatures = try MLDictionaryFeatureProvider(dictionary: ["mel_spectrogram": inputArray])
-
-        // Run inference
-        let output = try model.prediction(from: inputFeatures)
-
-        // Extract embedding
-        guard let embeddingArray = output.featureValue(for: "embedding")?.multiArrayValue else {
-            throw VoiceVerifierError.invalidOutput
-        }
-
-        // Convert to Float array
-        var embedding = [Float](repeating: 0, count: Self.embeddingDimension)
-        for i in 0 ..< Self.embeddingDimension {
-            embedding[i] = embeddingArray[i].floatValue
-        }
-
-        return embedding
     }
 
     // MARK: - Enrollment
@@ -302,7 +332,7 @@ final class VoiceVerifier {
     /// - Parameter samples: Array of audio sample arrays (each should be 2+ seconds)
     /// - Returns: The averaged embedding that was enrolled
     @discardableResult
-    func enroll(with samples: [[Float]]) throws -> [Float] {
+    func enroll(with samples: [[Float]]) async throws -> [Float] {
         guard !samples.isEmpty else {
             throw VoiceVerifierError.noSamplesProvided
         }
@@ -313,7 +343,7 @@ final class VoiceVerifier {
         var embeddings: [[Float]] = []
         for (index, sample) in samples.enumerated() {
             do {
-                let embedding = try generateEmbedding(from: sample)
+                let embedding = try await generateEmbedding(from: sample)
                 embeddings.append(embedding)
                 logDebug("VoiceVerifier: Generated embedding \(index + 1)/\(samples.count)")
             } catch {
@@ -332,7 +362,7 @@ final class VoiceVerifier {
         let normalized = l2Normalize(averaged)
 
         // Store enrolled embedding
-        enrolledEmbedding = normalized
+        lock.withLock { enrolledEmbedding = normalized }
         saveEnrolledEmbedding()
 
         logInfo("VoiceVerifier: Enrollment complete with \(embeddings.count) embeddings")
@@ -341,7 +371,7 @@ final class VoiceVerifier {
 
     /// Clear enrolled voice
     func clearEnrollment() {
-        enrolledEmbedding = nil
+        lock.withLock { enrolledEmbedding = nil }
         _ = KeychainManager.shared.deleteData(forKey: embeddingKeychainKey)
         try? FileManager.default.removeItem(at: embeddingFileURL)
         logInfo("VoiceVerifier: Enrollment cleared")
@@ -352,16 +382,17 @@ final class VoiceVerifier {
     /// Verify if the given audio matches the enrolled voice
     /// - Parameter audioSamples: Audio samples to verify (2+ seconds at 16kHz)
     /// - Returns: VerificationResult with match status and similarity score
-    func verify(audioSamples: [Float]) throws -> VerificationResult {
+    func verify(audioSamples: [Float]) async throws -> VerificationResult {
         guard isEnabled else {
             return VerificationResult(isMatch: true, similarity: 1.0, reason: .verificationDisabled)
         }
 
-        guard let enrolled = enrolledEmbedding else {
+        let enrolled = lock.withLock { enrolledEmbedding }
+        guard let enrolled else {
             return VerificationResult(isMatch: true, similarity: 1.0, reason: .notEnrolled)
         }
 
-        let currentEmbedding = try generateEmbedding(from: audioSamples)
+        let currentEmbedding = try await generateEmbedding(from: audioSamples)
         let normalized = l2Normalize(currentEmbedding)
         let similarity = cosineSimilarity(enrolled, normalized)
         let isMatch = similarity >= threshold
@@ -431,7 +462,7 @@ final class VoiceVerifier {
     }
 
     private func saveEnrolledEmbedding() {
-        guard let embedding = enrolledEmbedding else { return }
+        guard let embedding = lock.withLock({ enrolledEmbedding }) else { return }
 
         let data = embedding.withUnsafeBytes { Data($0) }
         switch KeychainManager.shared.setData(data, forKey: embeddingKeychainKey) {
@@ -449,7 +480,7 @@ final class VoiceVerifier {
         if let data = KeychainManager.shared.getData(forKey: embeddingKeychainKey),
            let embedding = decodeEmbedding(from: data)
         {
-            enrolledEmbedding = embedding
+            lock.withLock { enrolledEmbedding = embedding }
             logInfo("VoiceVerifier: Loaded enrolled embedding from Keychain")
             return
         }
@@ -458,7 +489,7 @@ final class VoiceVerifier {
         if let data = try? Data(contentsOf: embeddingFileURL),
            let embedding = decodeEmbedding(from: data)
         {
-            enrolledEmbedding = embedding
+            lock.withLock { enrolledEmbedding = embedding }
             logInfo("VoiceVerifier: Loaded enrolled embedding from legacy file, migrating to Keychain")
             switch KeychainManager.shared.setData(data, forKey: embeddingKeychainKey) {
             case .success:

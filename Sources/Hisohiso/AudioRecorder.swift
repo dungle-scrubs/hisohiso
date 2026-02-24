@@ -45,14 +45,31 @@ enum AudioRecorderError: Error, LocalizedError {
     }
 }
 
-/// Records audio from the system default input device using AVAudioEngine
-/// Thread safety: `audioBuffer` is protected by `bufferLock` (NSLock).
-/// Audio tap callbacks run on the audio render thread; public API is called from `@MainActor`.
+/// Records audio from the system default input device using AVAudioEngine.
+///
+/// ## Thread safety
+/// All mutable state (`audioBuffer`, `isRecording`, `isMonitoring`) is protected by
+/// `stateLock` (NSLock). Audio tap callbacks run on the audio render thread; public
+/// API is called from `@MainActor`. The lock is held only for short reads/writes —
+/// never across I/O or engine operations.
 final class AudioRecorder: @unchecked Sendable {
     private let engine = AVAudioEngine()
     private var audioBuffer: [Float] = []
-    private let bufferLock = NSLock()
-    private var isRecording = false
+    private let stateLock = NSLock()
+    private var _isRecording = false
+    private var _isMonitoring = false
+
+    /// Thread-safe read for recording state.
+    private var isRecording: Bool {
+        get { stateLock.withLock { _isRecording } }
+        set { stateLock.withLock { _isRecording = newValue } }
+    }
+
+    /// Thread-safe read for monitoring state.
+    private var isMonitoring: Bool {
+        get { stateLock.withLock { _isMonitoring } }
+        set { stateLock.withLock { _isMonitoring = newValue } }
+    }
 
     /// Target sample rate for WhisperKit (16kHz)
     private let targetSampleRate: Double = 16000
@@ -62,12 +79,9 @@ final class AudioRecorder: @unchecked Sendable {
 
     /// Called periodically with audio samples for streaming transcription
     var onAudioChunk: (([Float]) -> Void)?
-    
+
     /// Called continuously with audio samples when monitoring (for wake word detection)
     var onMonitoringSamples: ((_ samples: [Float], _ sampleRate: Double) -> Void)?
-    
-    /// Whether monitoring mode is active (continuous listening without recording)
-    private var isMonitoring = false
 
     /// UserDefaults key for persisted device selection
     private static let selectedDeviceKey = "selectedAudioDeviceUID"
@@ -215,7 +229,10 @@ final class AudioRecorder: @unchecked Sendable {
 
         // Set the device on the audio unit
         var deviceID = device.id
-        let audioUnit = engine.inputNode.audioUnit!
+        guard let audioUnit = engine.inputNode.audioUnit else {
+            logError("Audio unit unavailable for input node")
+            throw AudioRecorderError.noInputNode
+        }
 
         let status = AudioUnitSetProperty(
             audioUnit,
@@ -283,9 +300,9 @@ final class AudioRecorder: @unchecked Sendable {
         logInfo("Starting recording at \(inputFormat.sampleRate)Hz, \(inputFormat.channelCount) channels")
 
         // Clear previous buffer
-        bufferLock.lock()
+        stateLock.lock()
         audioBuffer.removeAll()
-        bufferLock.unlock()
+        stateLock.unlock()
 
         // Install tap on input node
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
@@ -314,10 +331,10 @@ final class AudioRecorder: @unchecked Sendable {
         engine.stop()
         isRecording = false
 
-        bufferLock.lock()
+        stateLock.lock()
         let samples = audioBuffer
         audioBuffer.removeAll()
-        bufferLock.unlock()
+        stateLock.unlock()
 
         // Normalize audio levels for better transcription
         let normalizedSamples = normalizeAudio(samples)
@@ -334,9 +351,9 @@ final class AudioRecorder: @unchecked Sendable {
         engine.stop()
         isRecording = false
 
-        bufferLock.lock()
+        stateLock.lock()
         audioBuffer.removeAll()
-        bufferLock.unlock()
+        stateLock.unlock()
 
         logInfo("Recording cancelled")
     }
@@ -429,8 +446,8 @@ final class AudioRecorder: @unchecked Sendable {
     /// - Parameter count: Number of samples to return
     /// - Returns: Most recent samples (or fewer if not enough recorded)
     func getRecentSamples(count: Int) -> [Float] {
-        bufferLock.lock()
-        defer { bufferLock.unlock() }
+        stateLock.lock()
+        defer { stateLock.unlock() }
 
         if audioBuffer.count <= count {
             return audioBuffer
@@ -467,57 +484,21 @@ final class AudioRecorder: @unchecked Sendable {
             resampledSamples = monoSamples
         }
 
-        bufferLock.lock()
+        stateLock.lock()
         audioBuffer.append(contentsOf: resampledSamples)
-        bufferLock.unlock()
+        stateLock.unlock()
 
         // Notify for streaming
         onAudioChunk?(resampledSamples)
     }
 
-    /// High-quality resampling using vDSP with anti-aliasing
+    /// Resample audio using shared DSP utility.
     private func resample(_ samples: [Float], from sourceSampleRate: Double, to targetSampleRate: Double) -> [Float] {
-        let ratio = Float(sourceSampleRate / targetSampleRate)
-        let outputLength = Int(Float(samples.count) / ratio)
-
-        guard outputLength > 0 else { return [] }
-
-        // Use vDSP for high-quality interpolation
-        var output = [Float](repeating: 0, count: outputLength)
-
-        // vDSP_vgenp performs high-quality polynomial interpolation
-        var control = (0..<outputLength).map { Float($0) * ratio }
-        vDSP_vlint(samples, &control, 1, &output, 1, vDSP_Length(outputLength), vDSP_Length(samples.count))
-
-        return output
+        AudioDSP.resample(samples, from: sourceSampleRate, to: targetSampleRate)
     }
 
-    /// Normalize audio to optimal level for transcription
+    /// Normalize audio using shared DSP utility.
     private func normalizeAudio(_ samples: [Float]) -> [Float] {
-        guard !samples.isEmpty else { return samples }
-
-        // Find peak amplitude
-        var peak: Float = 0
-        vDSP_maxmgv(samples, 1, &peak, vDSP_Length(samples.count))
-
-        logInfo("Audio peak before normalization: \(peak)")
-
-        // Avoid division by zero and don't amplify if already loud enough
-        guard peak > 0.001 else { 
-            logWarning("Audio peak too low (\(peak)), returning as-is")
-            return samples 
-        }
-
-        // Target peak at 0.9 to leave headroom
-        let targetPeak: Float = 0.9
-        let gain = min(targetPeak / peak, 20.0) // Cap gain at 20x (increased from 10x)
-
-        logInfo("Normalizing audio with gain: \(gain)x")
-
-        var output = [Float](repeating: 0, count: samples.count)
-        var gainVar = gain
-        vDSP_vsmul(samples, 1, &gainVar, &output, 1, vDSP_Length(samples.count))
-
-        return output
+        AudioDSP.normalize(samples)
     }
 }
