@@ -304,7 +304,19 @@ actor Transcriber {
 
         return try await withThrowingTaskGroup(of: String.self) { group in
             group.addTask {
-                let results = try await kit.transcribe(audioArray: audioSamples)
+                // Noise-optimized decode options:
+                // - usePrefillPrompt=false prevents hallucination loops from prior context
+                // - suppressBlank=true suppresses empty/blank tokens on noise-only segments
+                // - compressionRatioThreshold detects repetitive hallucinations
+                // - noSpeechThreshold detects silence/noise-only segments
+                let options = DecodingOptions(
+                    usePrefillPrompt: false,
+                    usePrefillCache: false,
+                    suppressBlank: true,
+                    compressionRatioThreshold: 2.4,
+                    noSpeechThreshold: 0.6
+                )
+                let results = try await kit.transcribe(audioArray: audioSamples, decodeOptions: options)
                 return results.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespaces)
             }
 
