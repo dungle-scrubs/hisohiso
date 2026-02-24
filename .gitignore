@@ -39,3 +39,6 @@ Models/
 # Image assets committed by mistake
 Resources/*.jpg
 Resources/*.png
+
+**/.DS_Store
+Hisohiso.app/
