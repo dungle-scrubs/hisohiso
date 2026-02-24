@@ -42,10 +42,9 @@ private class WaveformView: NSView {
         for i in 0 ..< barCount {
             let bar = CALayer()
             bar.backgroundColor = NSColor.white.withAlphaComponent(0.9).cgColor
-            bar.cornerRadius = 1 // Match Sinew: rounded(px(1.0))
+            bar.cornerRadius = 1
 
             let x = startX + CGFloat(i) * (barWidth + barSpacing)
-            // All bars start at same minBarHeight
             bar.frame = CGRect(
                 x: x,
                 y: (bounds.height - minBarHeight) / 2,
@@ -61,7 +60,7 @@ private class WaveformView: NSView {
     /// Update waveform with audio levels (0-100 for each bar)
     func updateLevels(_ levels: [UInt8]) {
         createBarsIfNeeded()
-        
+
         CATransaction.begin()
         CATransaction.setAnimationDuration(0.05)
         CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
@@ -95,14 +94,17 @@ private class WaveformView: NSView {
             let x = startX + CGFloat(i) * (barWidth + barSpacing)
             var frame = bar.frame
             frame.origin.x = x
-            // Keep height but re-center vertically
             frame.origin.y = (bounds.height - frame.height) / 2
             bar.frame = frame
         }
     }
 }
 
-/// Floating pill indicator at the bottom of the screen
+/// Floating pill indicator at the bottom of the screen.
+///
+/// Fallback UI when the custom Sinew hisohiso module is not available.
+/// When Sinew is running with the hisohiso module, this pill is suppressed
+/// and Sinew renders the waveform natively in the menu bar.
 final class FloatingPillWindow: NSWindow {
     private var waveformView: WaveformView?
     private var currentState: RecordingState = .idle
@@ -117,12 +119,10 @@ final class FloatingPillWindow: NSWindow {
 
         isOpaque = false
         backgroundColor = .clear
-        level = .screenSaver // Higher level to appear over everything
+        level = .screenSaver
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
         hasShadow = true
-        ignoresMouseEvents = false // Allow clicks for retry button
-
-        // Force visibility
+        ignoresMouseEvents = false
         alphaValue = 1.0
     }
 
@@ -140,7 +140,6 @@ final class FloatingPillWindow: NSWindow {
     ///   - onDismiss: Called when user dismisses the pill
     ///   - onRetry: Called when user clicks retry
     func show(state: RecordingState, onDismiss: @escaping () -> Void, onRetry: @escaping () -> Void) {
-        // Cancel any pending auto-dismiss
         autoDismissTimer?.invalidate()
         autoDismissTimer = nil
         currentState = state
@@ -159,7 +158,6 @@ final class FloatingPillWindow: NSWindow {
             idealWidth = 100
         }
 
-        // Use AppKit directly (SwiftUI NSHostingView has issues)
         let pillView = ClickableView(frame: NSRect(x: 0, y: 0, width: idealWidth, height: 44))
         pillView.wantsLayer = true
         pillView.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.85).cgColor
@@ -171,13 +169,10 @@ final class FloatingPillWindow: NSWindow {
         }
 
         if case .recording = state {
-            // Waveform for recording state — always create fresh
             let waveform = WaveformView(frame: NSRect(x: 0, y: 0, width: idealWidth, height: 44))
             pillView.addSubview(waveform)
             waveformView = waveform
         } else if case .transcribing = state {
-            // Keep waveform visible during transcription (frozen).
-            // Re-parent the existing view into the new pill, or create a fresh one.
             let waveform: WaveformView
             if let existing = waveformView {
                 existing.removeFromSuperview()
@@ -189,7 +184,6 @@ final class FloatingPillWindow: NSWindow {
             pillView.addSubview(waveform)
             waveformView = waveform
         } else {
-            // Text label for error states
             let label = NSTextField(labelWithString: state.displayText)
             label.font = NSFont.systemFont(ofSize: 13, weight: .medium)
             label.textColor = .white
@@ -205,7 +199,7 @@ final class FloatingPillWindow: NSWindow {
         if let screen = NSScreen.main {
             let frame = NSRect(
                 x: (screen.frame.width - idealWidth) / 2,
-                y: 80, // Above dock
+                y: 80,
                 width: idealWidth,
                 height: 44
             )
@@ -217,7 +211,6 @@ final class FloatingPillWindow: NSWindow {
 
         makeKeyAndOrderFront(nil)
 
-        // Auto-dismiss error after 3 seconds
         if case .error = state {
             autoDismissTimer = Timer.scheduledTimer(withTimeInterval: AppConstants.errorAutoDismissDelay, repeats: false) { [weak self] _ in
                 self?.orderOut(nil)
@@ -233,5 +226,3 @@ final class FloatingPillWindow: NSWindow {
         waveformView = nil
     }
 }
-
-
