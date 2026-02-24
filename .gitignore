@@ -42,3 +42,10 @@ Resources/*.png
 
 **/.DS_Store
 Hisohiso.app/
+
+# Agent / AI config (public repo)
+.claude/
+.tallow/
+CLAUDE.md
+AGENTS.md
+PLAN.md
