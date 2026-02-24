@@ -96,4 +96,65 @@ final class AudioDSPTests: XCTestCase {
             else { XCTAssertEqual(o, 0, accuracy: 0.0001) }
         }
     }
+
+    // MARK: - High-Pass Filter
+
+    func testHighPassFilterPreservesLength() {
+        let input = [Float](repeating: 0.5, count: 1000)
+        let output = AudioDSP.highPassFilter(input)
+        XCTAssertEqual(output.count, input.count)
+    }
+
+    func testHighPassFilterRemovesDCOffset() {
+        // A DC signal (constant value) should be attenuated by a high-pass filter
+        let input = [Float](repeating: 0.5, count: 16000) // 1 second of DC
+        let output = AudioDSP.highPassFilter(input)
+
+        // After settling, the output should be near zero for a DC input
+        let tailSamples = Array(output.suffix(8000))
+        let tailPeak = tailSamples.map { abs($0) }.max() ?? 1.0
+        XCTAssertLessThan(tailPeak, 0.05, "DC offset should be nearly removed")
+    }
+
+    func testHighPassFilterShortInput() {
+        // Very short input should pass through
+        let input: [Float] = [0.5, 0.3]
+        let output = AudioDSP.highPassFilter(input)
+        XCTAssertEqual(output.count, input.count)
+    }
+
+    func testHighPassFilterEmptyInput() {
+        let output = AudioDSP.highPassFilter([])
+        XCTAssertTrue(output.isEmpty)
+    }
+
+    // MARK: - Trim Silence
+
+    func testTrimSilenceRemovesLeadingTrailingSilence() {
+        // 1 second silence + 0.5 second speech + 1 second silence
+        var input = [Float](repeating: 0.0, count: 16000)
+        input.append(contentsOf: [Float](repeating: 0.3, count: 8000))
+        input.append(contentsOf: [Float](repeating: 0.0, count: 16000))
+
+        let output = AudioDSP.trimSilence(input)
+        // Output should be shorter than input (silence trimmed)
+        XCTAssertLessThan(output.count, input.count)
+        // Output should still contain the speech
+        XCTAssertGreaterThan(output.count, 0)
+    }
+
+    func testTrimSilenceShortInputPassthrough() {
+        // Input shorter than 0.5s should pass through unchanged
+        let input = [Float](repeating: 0.5, count: 4000)
+        let output = AudioDSP.trimSilence(input)
+        XCTAssertEqual(output.count, input.count)
+    }
+
+    func testTrimSilenceAllSpeechPassthrough() {
+        // All speech should pass through with minimal trimming
+        let input = [Float](repeating: 0.3, count: 16000)
+        let output = AudioDSP.trimSilence(input)
+        // Should keep most of the signal
+        XCTAssertGreaterThan(output.count, input.count / 2)
+    }
 }
