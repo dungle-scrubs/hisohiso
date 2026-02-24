@@ -1,10 +1,11 @@
 import Carbon.HIToolbox
 import Cocoa
+import os
 
 // MARK: - KeyCombo
 
 /// Represents a keyboard shortcut combination
-struct KeyCombo: Codable, Equatable {
+struct KeyCombo: Codable, Equatable, Sendable {
     /// Virtual key code (e.g., kVK_Space = 49)
     let keyCode: UInt32
 
@@ -44,7 +45,7 @@ struct KeyCombo: Codable, Equatable {
         if hasShift { parts.append("⇧") }
         if hasCommand { parts.append("⌘") }
 
-        parts.append(keyCodeToString(keyCode))
+        parts.append(KeyCodeUtils.keyCodeToString(UInt16(keyCode)))
 
         return parts.joined()
     }
@@ -59,74 +60,6 @@ struct KeyCombo: Codable, Equatable {
         return modifiers
     }
 
-    /// Convert key code to display string
-    private func keyCodeToString(_ keyCode: UInt32) -> String {
-        switch Int(keyCode) {
-        case kVK_Space: return "Space"
-        case kVK_Return: return "↵"
-        case kVK_Tab: return "⇥"
-        case kVK_Delete: return "⌫"
-        case kVK_ForwardDelete: return "⌦"
-        case kVK_Escape: return "⎋"
-        case kVK_UpArrow: return "↑"
-        case kVK_DownArrow: return "↓"
-        case kVK_LeftArrow: return "←"
-        case kVK_RightArrow: return "→"
-        case kVK_Home: return "↖"
-        case kVK_End: return "↘"
-        case kVK_PageUp: return "⇞"
-        case kVK_PageDown: return "⇟"
-        case kVK_F1: return "F1"
-        case kVK_F2: return "F2"
-        case kVK_F3: return "F3"
-        case kVK_F4: return "F4"
-        case kVK_F5: return "F5"
-        case kVK_F6: return "F6"
-        case kVK_F7: return "F7"
-        case kVK_F8: return "F8"
-        case kVK_F9: return "F9"
-        case kVK_F10: return "F10"
-        case kVK_F11: return "F11"
-        case kVK_F12: return "F12"
-        default:
-            return characterForKeyCode(UInt16(keyCode))?.uppercased() ?? "Key\(keyCode)"
-        }
-    }
-
-    /// Get character for a key code using the current keyboard layout
-    private func characterForKeyCode(_ keyCode: UInt16) -> String? {
-        let source = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
-        guard let layoutData = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else {
-            return nil
-        }
-
-        let data = unsafeBitCast(layoutData, to: CFData.self) as Data
-        var deadKeyState: UInt32 = 0
-        var chars = [UniChar](repeating: 0, count: 4)
-        var length = 0
-
-        let result = data.withUnsafeBytes { ptr -> OSStatus in
-            guard let layoutPtr = ptr.baseAddress?.assumingMemoryBound(to: UCKeyboardLayout.self) else {
-                return errSecParam
-            }
-            return UCKeyTranslate(
-                layoutPtr,
-                keyCode,
-                UInt16(kUCKeyActionDown),
-                0,
-                UInt32(LMGetKbdType()),
-                UInt32(kUCKeyTranslateNoDeadKeysBit),
-                &deadKeyState,
-                chars.count,
-                &length,
-                &chars
-            )
-        }
-
-        guard result == noErr, length > 0 else { return nil }
-        return String(utf16CodeUnits: chars, count: length)
-    }
-
     // MARK: - Common Presets
 
     static let cmdShiftSpace = KeyCombo(keyCode: UInt32(kVK_Space), modifiers: UInt32(cmdKey | shiftKey))
@@ -136,11 +69,23 @@ struct KeyCombo: Codable, Equatable {
 
 // MARK: - HotkeyManager
 
-/// Manages the alternative dictation hotkey (in addition to Globe key)
+/// Manages the alternative dictation hotkey (in addition to Globe key).
+///
+/// Uses the shared `EventTapManager` instead of creating its own CGEventTap.
+/// The hotkey configuration is stored in a lock-protected field so the event tap
+/// callback (which runs on an arbitrary thread) can read it safely.
 @MainActor
 final class HotkeyManager: ObservableObject {
-    /// Current hotkey combo (nil = disabled)
+    /// Registration ID for EventTapManager. `nonisolated(unsafe)` allows access from `deinit`.
+    nonisolated(unsafe) private static let registrationID = "hotkey-manager"
+
+    /// Current hotkey combo (nil = disabled). Published for UI binding.
     @Published private(set) var currentHotkey: KeyCombo?
+
+    /// Thread-safe copy of the hotkey for the event tap callback.
+    /// The CGEventTap callback fires on an arbitrary thread and must read
+    /// the hotkey synchronously to decide whether to consume the event.
+    private let hotkeyLock: os.OSAllocatedUnfairLock<KeyCombo?>
 
     /// Callback when hotkey is pressed
     var onHotkeyDown: (() -> Void)?
@@ -148,24 +93,17 @@ final class HotkeyManager: ObservableObject {
     /// Callback when hotkey is released
     var onHotkeyUp: (() -> Void)?
 
-    private var eventTap: CFMachPort?
-    private var runLoopSource: CFRunLoopSource?
     private var isHotkeyPressed = false
 
     private let userDefaultsKey = "alternativeHotkey"
 
     init() {
+        hotkeyLock = os.OSAllocatedUnfairLock(initialState: nil)
         loadSavedHotkey()
     }
 
     deinit {
-        // Clean up event tap
-        if let tap = eventTap {
-            CGEvent.tapEnable(tap: tap, enable: false)
-        }
-        if let source = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
-        }
+        EventTapManager.shared.unregister(id: Self.registrationID)
     }
 
     // MARK: - Public API
@@ -175,6 +113,7 @@ final class HotkeyManager: ObservableObject {
     func setHotkey(_ keyCombo: KeyCombo?) {
         stop()
         currentHotkey = keyCombo
+        hotkeyLock.withLock { $0 = keyCombo }
         saveHotkey()
 
         if keyCombo != nil {
@@ -187,79 +126,45 @@ final class HotkeyManager: ObservableObject {
     /// Start monitoring for the hotkey
     @discardableResult
     func start() -> Bool {
-        guard let hotkey = currentHotkey else {
+        guard currentHotkey != nil else {
             logDebug("No hotkey configured, not starting monitor")
             return false
         }
 
-        guard eventTap == nil else {
-            logWarning("HotkeyManager already running")
-            return true
+        EventTapManager.shared.register(
+            id: Self.registrationID,
+            eventTypes: [.keyDown, .keyUp]
+        ) { [weak self] event, type in
+            guard let self else { return false }
+            return self.handleKeyEvent(event, isDown: type == .keyDown)
         }
 
-        let eventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
+        EventTapManager.shared.start()
 
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: CGEventMask(eventMask),
-            callback: { _, type, event, refcon -> Unmanaged<CGEvent>? in
-                guard let refcon else { return Unmanaged.passUnretained(event) }
-                let manager = Unmanaged<HotkeyManager>.fromOpaque(refcon).takeUnretainedValue()
-
-                if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-                    if let tap = manager.eventTap {
-                        CGEvent.tapEnable(tap: tap, enable: true)
-                    }
-                    return Unmanaged.passUnretained(event)
-                }
-
-                let consumed = manager.handleKeyEvent(event, isDown: type == .keyDown)
-                return consumed ? nil : Unmanaged.passUnretained(event)
-            },
-            userInfo: Unmanaged.passUnretained(self).toOpaque()
-        ) else {
-            logError("Failed to create event tap for HotkeyManager")
-            return false
-        }
-
-        eventTap = tap
-        runLoopSource = CFMachPortCreateRunLoopSource(nil, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
-
-        logInfo("HotkeyManager started monitoring: \(hotkey.displayString)")
+        logInfo("HotkeyManager started monitoring: \(currentHotkey?.displayString ?? "")")
         return true
     }
 
     /// Stop monitoring
     func stop() {
-        if let tap = eventTap {
-            CGEvent.tapEnable(tap: tap, enable: false)
-        }
-        if let source = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
-        }
-        eventTap = nil
-        runLoopSource = nil
+        EventTapManager.shared.unregister(id: Self.registrationID)
         isHotkeyPressed = false
         logInfo("HotkeyManager stopped")
     }
 
     // MARK: - Private
 
+    /// Handle key events from the event tap callback (runs on arbitrary thread).
+    /// Reads the hotkey from a lock-protected field to avoid data races.
     private nonisolated func handleKeyEvent(_ event: CGEvent, isDown: Bool) -> Bool {
-        guard let hotkey = MainActor.assumeIsolated({ self.currentHotkey }) else { return false }
+        // Read hotkey from thread-safe storage (not @MainActor-isolated property)
+        guard let hotkey = hotkeyLock.withLock({ $0 }) else { return false }
 
         let keyCode = UInt32(event.getIntegerValueField(.keyboardEventKeycode))
         guard keyCode == hotkey.keyCode else { return false }
 
-        // Check modifiers
-        let flags = event.flags
-        let currentModifiers = KeyCombo(keyCode: keyCode, flags: flags).modifiers
-
-        // Must match exactly (ignoring caps lock)
+        // Check modifiers match exactly (ignoring caps lock)
+        let currentModifiers = KeyCombo(keyCode: keyCode, flags: event.flags).modifiers
         guard currentModifiers == hotkey.modifiers else { return false }
 
         Task { @MainActor [weak self] in
@@ -287,6 +192,7 @@ final class HotkeyManager: ObservableObject {
             return
         }
         currentHotkey = hotkey
+        hotkeyLock.withLock { $0 = hotkey }
         logInfo("Loaded saved hotkey: \(hotkey.displayString)")
     }
 
@@ -394,7 +300,6 @@ final class HotkeyRecorderView: NSView {
             return nil // Consume all events while recording
         }
 
-        // Also listen for escape to cancel
         window?.makeFirstResponder(self)
     }
 
@@ -411,13 +316,11 @@ final class HotkeyRecorderView: NSView {
     }
 
     private func handleRecordingEvent(_ event: NSEvent) {
-        // Escape cancels recording
         if event.keyCode == UInt16(kVK_Escape) {
             stopRecording()
             return
         }
 
-        // Only process key down with modifiers
         guard event.type == .keyDown else { return }
 
         let flags = event.modifierFlags
