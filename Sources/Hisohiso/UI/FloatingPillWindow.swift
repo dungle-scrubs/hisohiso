@@ -171,22 +171,23 @@ final class FloatingPillWindow: NSWindow {
         }
 
         if case .recording = state {
-            // Waveform for recording state
+            // Waveform for recording state — always create fresh
             let waveform = WaveformView(frame: NSRect(x: 0, y: 0, width: idealWidth, height: 44))
             pillView.addSubview(waveform)
             waveformView = waveform
         } else if case .transcribing = state {
-            // Keep waveform visible during transcription (frozen)
-            // Don't create new waveform, just keep the existing one if present
-            if let existingWaveform = waveformView {
-                existingWaveform.frame = NSRect(x: 0, y: 0, width: idealWidth, height: 44)
-                pillView.addSubview(existingWaveform)
+            // Keep waveform visible during transcription (frozen).
+            // Re-parent the existing view into the new pill, or create a fresh one.
+            let waveform: WaveformView
+            if let existing = waveformView {
+                existing.removeFromSuperview()
+                existing.frame = NSRect(x: 0, y: 0, width: idealWidth, height: 44)
+                waveform = existing
             } else {
-                // Fallback: create static waveform
-                let waveform = WaveformView(frame: NSRect(x: 0, y: 0, width: idealWidth, height: 44))
-                pillView.addSubview(waveform)
-                waveformView = waveform
+                waveform = WaveformView(frame: NSRect(x: 0, y: 0, width: idealWidth, height: 44))
             }
+            pillView.addSubview(waveform)
+            waveformView = waveform
         } else {
             // Text label for error states
             let label = NSTextField(labelWithString: state.displayText)

@@ -232,18 +232,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Transient toast window held as ivar to avoid premature deallocation.
+    private var toastWindow: NSWindow?
+
+    /// Show a brief non-modal toast at the bottom of the screen.
     private func showCopiedNotification() {
-        // Brief non-modal visual feedback that text was copied
-        let window = NSWindow(
+        let toast = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 220, height: 36),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.level = .screenSaver
-        window.collectionBehavior = [.canJoinAllSpaces, .stationary]
+        toast.isOpaque = false
+        toast.backgroundColor = .clear
+        toast.level = .screenSaver
+        toast.collectionBehavior = [.canJoinAllSpaces, .stationary]
 
         let label = NSTextField(labelWithString: "✓ Copied to clipboard")
         label.font = .systemFont(ofSize: 13, weight: .medium)
@@ -256,18 +259,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         container.layer?.cornerRadius = 18
         label.frame = container.bounds
         container.addSubview(label)
-        window.contentView = container
+        toast.contentView = container
 
         if let screen = NSScreen.main {
             let x = (screen.frame.width - 220) / 2
-            window.setFrame(NSRect(x: x, y: 120, width: 220, height: 36), display: true)
+            toast.setFrame(NSRect(x: x, y: 120, width: 220, height: 36), display: true)
         }
 
-        window.orderFrontRegardless()
+        // Hold a strong reference until dismissal
+        self.toastWindow = toast
+        toast.orderFrontRegardless()
 
-        // Auto-dismiss after 1.5 seconds
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            window.orderOut(nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            self?.toastWindow?.orderOut(nil)
+            self?.toastWindow = nil
         }
     }
 
@@ -481,8 +486,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         modelItem.submenu = modelMenu
         menu.addItem(modelItem)
 
+        #if DEBUG
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Test UI", action: #selector(testUI), keyEquivalent: ""))
+        #endif
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Preferences...", action: #selector(showPreferences), keyEquivalent: ","))
         menu.addItem(NSMenuItem.separator())
@@ -512,16 +519,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         logInfo("Model selected: \(model.rawValue)")
     }
     
+    #if DEBUG
     @objc private func testUI() {
         logInfo("testUI called - showing pill")
         dictationController?.stateManager.setRecording()
-        
+
         // Hide after 3 seconds
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             self?.dictationController?.stateManager.setIdle()
         }
     }
-    
+    #endif
+
     private func showOnboarding() {
         logInfo("Showing onboarding")
         onboardingWindow = OnboardingWindow { [weak self] in

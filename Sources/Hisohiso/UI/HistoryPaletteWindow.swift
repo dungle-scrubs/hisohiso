@@ -614,14 +614,15 @@ private final class HistoryRecordCellView: NSTableCellView {
         ])
     }
 
+    /// Shared formatter instance — `RelativeDateTimeFormatter` is expensive to create.
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f
+    }()
+
     func configure(with record: TranscriptionRecord) {
         textLabel.stringValue = record.text
-        timestampLabel.stringValue = formatRelativeTime(record.timestamp)
-    }
-
-    private func formatRelativeTime(_ date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
+        timestampLabel.stringValue = Self.relativeFormatter.localizedString(for: record.timestamp, relativeTo: Date())
     }
 }
