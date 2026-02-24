@@ -36,7 +36,7 @@ final class Logger: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.hisohiso.logger", qos: .utility)
 
     /// Maximum age (in days) for log files before automatic cleanup.
-    private let maxLogAgeDays = 14
+    private let maxLogAgeDays = AppConstants.maxLogAgeDays
 
     private init() {
         // Create log directory

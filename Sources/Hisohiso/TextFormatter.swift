@@ -34,7 +34,7 @@ struct TextFormatter {
         let words: Set<String>
         if let fillerWords {
             words = fillerWords
-        } else if let saved = UserDefaults.standard.stringArray(forKey: "fillerWords") {
+        } else if let saved = UserDefaults.standard.stringArray(for: .fillerWords) {
             words = Set(saved)
         } else {
             words = Self.defaultFillerWords
@@ -104,19 +104,29 @@ struct TextFormatter {
     private func applyCaps(to text: String) -> String {
         guard !text.isEmpty else { return text }
 
-        var result = text
+        var chars = Array(text)
         var shouldCapitalize = capitalizeFirst
+        /// Track if we just saw sentence-ending punctuation and are scanning for whitespace.
+        var pendingCapitalize = false
 
-        var chars = Array(result)
-        for i in 0 ..< chars.count {
+        for i in 0..<chars.count {
             if shouldCapitalize, chars[i].isLetter {
                 chars[i] = Character(chars[i].uppercased())
                 shouldCapitalize = false
+                pendingCapitalize = false
             }
 
-            // Check for sentence-ending punctuation
-            if capitalizeSentences, [".", "!", "?"].contains(String(chars[i])) {
-                shouldCapitalize = true
+            if capitalizeSentences {
+                if [".", "!", "?"].contains(String(chars[i])) {
+                    // Don't capitalize yet — wait for whitespace to confirm sentence boundary
+                    pendingCapitalize = true
+                } else if pendingCapitalize && chars[i].isWhitespace {
+                    shouldCapitalize = true
+                    pendingCapitalize = false
+                } else if pendingCapitalize && !chars[i].isWhitespace && chars[i] != "." && chars[i] != "!" && chars[i] != "?" {
+                    // Non-whitespace after punctuation (e.g., "3.5", "e.g.") — not a sentence boundary
+                    pendingCapitalize = false
+                }
             }
         }
 

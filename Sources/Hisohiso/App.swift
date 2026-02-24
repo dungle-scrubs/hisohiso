@@ -36,7 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hasPendingModelReload = false
 
     /// UserDefaults key for tracking first launch
-    private let hasCompletedOnboardingKey = "hasCompletedOnboarding"
+    private let hasCompletedOnboardingKey = SettingsKey.hasCompletedOnboarding
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         logInfo("Hisohiso starting...")
@@ -53,7 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupSettingsObservers()
 
         // Check if first launch
-        if !UserDefaults.standard.bool(forKey: hasCompletedOnboardingKey) {
+        if !UserDefaults.standard.bool(for: hasCompletedOnboardingKey) {
             showOnboarding()
         } else {
             setupDictationController()
@@ -149,7 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applySelectedMicrophonePreference() {
-        let selectedUID = UserDefaults.standard.string(forKey: "selectedAudioDeviceUID")
+        let selectedUID = UserDefaults.standard.string(for: .selectedAudioDeviceUID)
         let selectedDevice = AudioRecorder.availableInputDevices().first {
             $0.uid == selectedUID
         } ?? .systemDefault
@@ -232,48 +232,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Transient toast window held as ivar to avoid premature deallocation.
-    private var toastWindow: NSWindow?
+    /// Reusable toast for clipboard notifications.
+    private let toast = ToastWindow()
 
-    /// Show a brief non-modal toast at the bottom of the screen.
     private func showCopiedNotification() {
-        let toast = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 220, height: 36),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        toast.isOpaque = false
-        toast.backgroundColor = .clear
-        toast.level = .screenSaver
-        toast.collectionBehavior = [.canJoinAllSpaces, .stationary]
-
-        let label = NSTextField(labelWithString: "✓ Copied to clipboard")
-        label.font = .systemFont(ofSize: 13, weight: .medium)
-        label.textColor = .white
-        label.alignment = .center
-
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 36))
-        container.wantsLayer = true
-        container.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.85).cgColor
-        container.layer?.cornerRadius = 18
-        label.frame = container.bounds
-        container.addSubview(label)
-        toast.contentView = container
-
-        if let screen = NSScreen.main {
-            let x = (screen.frame.width - 220) / 2
-            toast.setFrame(NSRect(x: x, y: 120, width: 220, height: 36), display: true)
-        }
-
-        // Hold a strong reference until dismissal
-        self.toastWindow = toast
-        toast.orderFrontRegardless()
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            self?.toastWindow?.orderOut(nil)
-            self?.toastWindow = nil
-        }
+        toast.show("✓ Copied to clipboard")
     }
 
     private func setupDictationController() {
@@ -390,7 +353,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 guard let self else { return }
 
-                let isEnabled = UserDefaults.standard.bool(forKey: "wakeWordEnabled")
+                let isEnabled = UserDefaults.standard.bool(for: .wakeWordEnabled)
                 self.wakeWordManager?.isEnabled = isEnabled
 
                 if isEnabled {
@@ -535,7 +498,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         logInfo("Showing onboarding")
         onboardingWindow = OnboardingWindow { [weak self] in
             guard let self else { return }
-            UserDefaults.standard.set(true, forKey: self.hasCompletedOnboardingKey)
+            UserDefaults.standard.set(true, for: self.hasCompletedOnboardingKey)
             self.onboardingWindow = nil
             self.setupDictationController()
             logInfo("Onboarding completed")

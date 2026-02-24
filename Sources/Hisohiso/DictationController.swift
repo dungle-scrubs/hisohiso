@@ -12,10 +12,17 @@ final class DictationController: ObservableObject {
 
     /// Whether to use AudioKit for recording (with noise handling)
     var useAudioKit: Bool {
-        get { UserDefaults.standard.bool(forKey: "useAudioKit") }
-        set { UserDefaults.standard.set(newValue, forKey: "useAudioKit") }
+        get { UserDefaults.standard.bool(for: .useAudioKit) }
+        set { UserDefaults.standard.set(newValue, for: .useAudioKit) }
     }
+
+    /// The active recorder, selected by the `useAudioKit` preference.
+    private var activeRecorder: AudioRecording {
+        useAudioKit ? audioKitRecorder : audioRecorder
+    }
+
     private let textInserter = TextInserter()
+    private let textFormatter = TextFormatter()
     private let audioFeedback = AudioFeedback()
     private let modelManager: ModelManager
     private let hotkeyManager: HotkeyManager?
@@ -38,15 +45,15 @@ final class DictationController: ObservableObject {
 
     /// Whether current recording was triggered by wake word (auto-stop on silence)
     private var isWakeWordTriggered = false
-    
+
     /// Silence detection for wake word auto-stop
     private var silenceFrameCount = 0
-    private let silenceThresholdForStop = 25 // ~1.25s of silence to auto-stop (after grace period)
-    private let silenceRMSThreshold: Float = 0.01
-    
-    /// Grace period before silence detection starts (3 seconds = 60 frames at 50ms)
+    private let silenceThresholdForStop = AppConstants.silenceThresholdForStop
+    private let silenceRMSThreshold: Float = AppConstants.silenceRMSThreshold
+
+    /// Grace period before silence detection starts
     private var gracePeriodFrames = 0
-    private let gracePeriodThreshold = 60 // 3 seconds at 50ms per frame
+    private let gracePeriodThreshold = AppConstants.silenceGracePeriodFrames
 
     private var isInitialized = false
 
@@ -94,11 +101,7 @@ final class DictationController: ObservableObject {
         hotkeyManager?.stop()
         stopEscapeMonitor()
         if stateManager.isRecording {
-            if useAudioKit {
-                audioKitRecorder.cancelRecording()
-            } else {
-                audioRecorder.cancelRecording()
-            }
+            activeRecorder.cancelRecording()
         }
         stateManager.setIdle()
         logInfo("DictationController shutdown")
@@ -207,13 +210,8 @@ final class DictationController: ObservableObject {
         recordingStartTime = Date()
 
         do {
-            if useAudioKit {
-                try audioKitRecorder.startRecording()
-                logInfo("Using AudioKit recorder")
-            } else {
-                try audioRecorder.startRecording()
-                logInfo("Using AVAudioEngine recorder\(fromWakeWord ? " (wake word triggered, auto-stop enabled)" : "")")
-            }
+            try activeRecorder.startRecording()
+            logInfo("Using \(useAudioKit ? "AudioKit" : "AVAudioEngine") recorder\(fromWakeWord ? " (wake word triggered, auto-stop enabled)" : "")")
 
             // Notify Sinew
             sinewBridge.sendState(.recording)
@@ -238,11 +236,7 @@ final class DictationController: ObservableObject {
         stopEscapeMonitor()
         stopAudioLevelUpdates()
 
-        if useAudioKit {
-            audioKitRecorder.cancelRecording()
-        } else {
-            audioRecorder.cancelRecording()
-        }
+        activeRecorder.cancelRecording()
 
         stateManager.setIdle()
         sinewBridge.sendState(.idle)
@@ -251,7 +245,7 @@ final class DictationController: ObservableObject {
     private func startEscapeMonitor() {
         // Use global monitor since we're a menu bar app without a key window
         escapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.keyCode == 53 { // Escape key
+            if event.keyCode == AppConstants.escapeKeyCode {
                 logInfo("Escape pressed - cancelling recording")
                 Task { @MainActor [weak self] in
                     self?.cancelRecording()
@@ -271,7 +265,7 @@ final class DictationController: ObservableObject {
 
     private func startAudioLevelUpdates() {
         audioLevelTimer?.invalidate()
-        audioLevelTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+        audioLevelTimer = Timer.scheduledTimer(withTimeInterval: AppConstants.audioLevelUpdateInterval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.handleAudioLevelTick()
             }
@@ -280,13 +274,7 @@ final class DictationController: ObservableObject {
 
     @MainActor
     private func handleAudioLevelTick() {
-        // Get recent audio samples from recorder
-        let samples: [Float]
-        if useAudioKit {
-            samples = audioKitRecorder.getRecentSamples(count: 1600)
-        } else {
-            samples = audioRecorder.getRecentSamples(count: 1600)
-        }
+        let samples = activeRecorder.getRecentSamples(count: 1600)
 
         // Calculate levels and send to Sinew and UI
         let levels = SinewBridge.calculateAudioLevels(from: samples)
@@ -346,12 +334,7 @@ final class DictationController: ObservableObject {
         stopAudioLevelUpdates()
         stopEscapeMonitor()
 
-        let audioSamples: [Float]
-        if useAudioKit {
-            audioSamples = audioKitRecorder.stopRecording()
-        } else {
-            audioSamples = audioRecorder.stopRecording()
-        }
+        let audioSamples = activeRecorder.stopRecording()
 
         // Notify Sinew of transcribing state
         sinewBridge.sendState(.transcribing)
@@ -361,7 +344,7 @@ final class DictationController: ObservableObject {
         if let startTime = recordingStartTime {
             duration = Date().timeIntervalSince(startTime)
         } else {
-            duration = Double(audioSamples.count) / 16000.0 // Estimate from samples
+            duration = Double(audioSamples.count) / AppConstants.targetSampleRate
         }
         recordingStartTime = nil
 
@@ -372,10 +355,9 @@ final class DictationController: ObservableObject {
             return
         }
 
-        // Minimum audio length check - Parakeet needs at least 1 second (16000 samples)
-        let minSamples = 16000 // 1s at 16kHz
-        guard audioSamples.count >= minSamples else {
-            logInfo("Audio too short (\(audioSamples.count) samples, need \(minSamples)), ignoring")
+        // Minimum audio length check — Parakeet needs at least 1 second
+        guard audioSamples.count >= AppConstants.minTranscriptionSamples else {
+            logInfo("Audio too short (\(audioSamples.count) samples, need \(AppConstants.minTranscriptionSamples)), ignoring")
             // Just go back to idle silently - no error, just not enough audio
             stateManager.setIdle()
             sinewBridge.sendState(.idle)
@@ -416,7 +398,7 @@ final class DictationController: ObservableObject {
                 return
             }
 
-            let formattedText = TextFormatter().format(rawText)
+            let formattedText = textFormatter.format(rawText)
             logInfo("Formatted: '\(rawText)' → '\(formattedText)'")
 
             // Save to history
@@ -449,9 +431,6 @@ final class DictationController: ObservableObject {
     }
 
     #if DEBUG
-    /// Maximum number of debug audio files to keep.
-    private static let maxDebugAudioFiles = 10
-
     /// Save audio samples to file for debugging, pruning old files.
     private func saveDebugAudio(_ samples: [Float]) {
         let debugDir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("hisohiso-debug")
@@ -481,7 +460,7 @@ final class DictationController: ObservableObject {
             .sorted(by: { ($0.lastPathComponent) > ($1.lastPathComponent) })
         else { return }
 
-        for file in files.dropFirst(Self.maxDebugAudioFiles) {
+        for file in files.dropFirst(AppConstants.maxDebugAudioFiles) {
             try? fm.removeItem(at: file)
         }
     }

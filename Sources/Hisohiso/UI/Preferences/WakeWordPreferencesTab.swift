@@ -69,8 +69,8 @@ final class WakeWordPreferencesTab: NSView {
     }
 
     private func loadSettings() {
-        wakeWordToggle.state = UserDefaults.standard.bool(forKey: "wakeWordEnabled") ? .on : .off
-        wakePhraseField.stringValue = UserDefaults.standard.string(forKey: "wakePhrase") ?? "hey hisohiso"
+        wakeWordToggle.state = UserDefaults.standard.bool(for: .wakeWordEnabled) ? .on : .off
+        wakePhraseField.stringValue = UserDefaults.standard.string(for: .wakePhrase) ?? AppConstants.defaultWakePhrase
         updateStatus()
     }
 
@@ -85,14 +85,14 @@ final class WakeWordPreferencesTab: NSView {
     }
 
     @objc private func toggleChanged() {
-        UserDefaults.standard.set(wakeWordToggle.state == .on, forKey: "wakeWordEnabled")
+        UserDefaults.standard.set(wakeWordToggle.state == .on, for: .wakeWordEnabled)
         updateStatus()
         NotificationCenter.default.post(name: .wakeWordSettingsChanged, object: nil)
     }
 
     @objc private func phraseChanged() {
         let phrase = wakePhraseField.stringValue.lowercased().trimmingCharacters(in: .whitespaces)
-        UserDefaults.standard.set(phrase, forKey: "wakePhrase")
+        UserDefaults.standard.set(phrase, for: .wakePhrase)
         updateStatus()
         NotificationCenter.default.post(name: .wakeWordSettingsChanged, object: nil)
     }

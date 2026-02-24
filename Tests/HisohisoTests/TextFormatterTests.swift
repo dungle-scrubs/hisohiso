@@ -221,6 +221,45 @@ final class TextFormatterTests: XCTestCase {
         XCTAssertFalse(TextFormatter.defaultFillerWords.contains("actually"))
     }
 
+    // MARK: - Abbreviations & Decimals
+
+    func testPreservesAbbreviations() {
+        let formatter = TextFormatter(removeFillers: false)
+        // Should NOT capitalize mid-abbreviation (old bug: e.g. → E.G.)
+        // Period+space is still treated as sentence boundary (expected)
+        XCTAssertEqual(
+            formatter.format("e.g. the example"),
+            "E.g. The example"
+        )
+    }
+
+    func testPreservesDecimals() {
+        let formatter = TextFormatter(removeFillers: false)
+        // Should NOT capitalize after decimal points
+        XCTAssertEqual(
+            formatter.format("the temperature is 3.5 degrees"),
+            "The temperature is 3.5 degrees"
+        )
+    }
+
+    func testCapitalizesAfterPeriodSpace() {
+        let formatter = TextFormatter(removeFillers: false)
+        // Should capitalize after period followed by space
+        XCTAssertEqual(
+            formatter.format("first sentence. second sentence"),
+            "First sentence. Second sentence"
+        )
+    }
+
+    func testCapitalizesAfterEllipsis() {
+        let formatter = TextFormatter(removeFillers: false)
+        // Ellipsis followed by space should capitalize
+        XCTAssertEqual(
+            formatter.format("wait... then continue"),
+            "Wait... Then continue"
+        )
+    }
+
     // MARK: - Real-World Examples
 
     func testRealWorldDictation() {
