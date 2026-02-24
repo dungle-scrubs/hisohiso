@@ -1,6 +1,11 @@
 import Foundation
 
 /// Bridge to communicate with Sinew's external Hisohiso module via Unix socket IPC.
+///
+/// ## Thread safety
+/// All socket I/O and `_isAvailable` writes happen on the serial `queue`.
+/// `useSinewVisualization` and `showFloatingPill` are backed by `UserDefaults`
+/// (atomic for simple types). Safe to call `sendState` from any thread.
 final class SinewBridge: @unchecked Sendable {
     static let shared = SinewBridge()
 
@@ -96,11 +101,10 @@ final class SinewBridge: @unchecked Sendable {
         }
     }
 
-    /// Sinew external modules do not expose a waveform API, so levels are ignored.
-    /// - Parameter levels: Array of audio levels (unused).
-    func sendAudioLevels(_ levels: [UInt8]) {
-        _ = levels
-    }
+    /// No-op: Sinew external modules do not expose a waveform API.
+    /// Audio levels are rendered by `FloatingPillWindow` instead; this method
+    /// exists only to keep the call site in `DictationController` uniform.
+    func sendAudioLevels(_ levels: [UInt8]) {}
 
     /// Check if Sinew socket is available.
     func checkAvailability() {
@@ -134,9 +138,15 @@ final class SinewBridge: @unchecked Sendable {
 
             var addr = sockaddr_un()
             addr.sun_family = sa_family_t(AF_UNIX)
-            self.socketPath.withCString { ptr in
+            let pathBytes = self.socketPath.utf8CString
+            let maxLen = MemoryLayout.size(ofValue: addr.sun_path)
+            guard pathBytes.count <= maxLen else {
+                logError("Sinew: Socket path too long (\(pathBytes.count) > \(maxLen))")
+                return
+            }
+            pathBytes.withUnsafeBufferPointer { src in
                 withUnsafeMutablePointer(to: &addr.sun_path.0) { dest in
-                    _ = strcpy(dest, ptr)
+                    dest.update(from: src.baseAddress!, count: src.count)
                 }
             }
 
