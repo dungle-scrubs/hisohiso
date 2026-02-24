@@ -20,8 +20,9 @@ enum TextInserterError: Error, LocalizedError {
 /// Inserts text at the current cursor position using keyboard events
 final class TextInserter {
     /// Maximum text length for direct character insertion (longer uses paste).
-    /// Kept low to minimize main thread blocking from per-character usleep delays.
-    private let directInsertionThreshold = 50
+    /// Set conservatively low — per-character insertion uses usleep which blocks.
+    /// Paste is faster and preferred for almost all real dictation output.
+    private let directInsertionThreshold = 10
 
     /// Insert text at the current cursor position
     /// - Parameter text: Text to insert

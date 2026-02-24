@@ -69,6 +69,15 @@ final class TextFormatterTests: XCTestCase {
 
     func testRemovesMultipleFillers() {
         let formatter = TextFormatter()
+        // "like" is no longer a default filler — only um, uh, i mean are
+        XCTAssertEqual(
+            formatter.format("um uh i mean it works"),
+            "It works"
+        )
+    }
+
+    func testRemovesMultipleFillersWithCustomSet() {
+        let formatter = TextFormatter(fillerWords: ["um", "uh", "like", "i mean"])
         XCTAssertEqual(
             formatter.format("um uh like i mean it works"),
             "It works"
@@ -191,8 +200,9 @@ final class TextFormatterTests: XCTestCase {
 
     func testMultipleSentencesWithFillers() {
         let formatter = TextFormatter()
+        // "like" is no longer a default filler
         XCTAssertEqual(
-            formatter.format("um hello. uh how are you. like i am fine"),
+            formatter.format("um hello. uh how are you. er i am fine"),
             "Hello. How are you. I am fine"
         )
     }
@@ -203,14 +213,29 @@ final class TextFormatterTests: XCTestCase {
         XCTAssertFalse(TextFormatter.defaultFillerWords.isEmpty)
         XCTAssertTrue(TextFormatter.defaultFillerWords.contains("um"))
         XCTAssertTrue(TextFormatter.defaultFillerWords.contains("uh"))
-        XCTAssertTrue(TextFormatter.defaultFillerWords.contains("like"))
+        // "like", "so", "well" etc. were removed from defaults as too aggressive
+        XCTAssertFalse(TextFormatter.defaultFillerWords.contains("like"))
+        XCTAssertFalse(TextFormatter.defaultFillerWords.contains("so"))
+        XCTAssertFalse(TextFormatter.defaultFillerWords.contains("well"))
+        XCTAssertFalse(TextFormatter.defaultFillerWords.contains("right"))
+        XCTAssertFalse(TextFormatter.defaultFillerWords.contains("actually"))
     }
 
     // MARK: - Real-World Examples
 
     func testRealWorldDictation() {
         let formatter = TextFormatter()
-        // "so" and "basically" are also filler words
+        // Default fillers: um, uh, er, ah, you know, i mean, kind of, sort of
+        // "so" and "basically" are NOT default fillers (too aggressive)
+        XCTAssertEqual(
+            formatter.format("um so basically i think we should um schedule a meeting you know"),
+            "So basically i think we should schedule a meeting"
+        )
+    }
+
+    func testRealWorldDictationWithCustomFillers() {
+        // Users can still add aggressive fillers via preferences
+        let formatter = TextFormatter(fillerWords: ["um", "uh", "so", "basically", "you know"])
         XCTAssertEqual(
             formatter.format("um so basically i think we should um schedule a meeting you know"),
             "I think we should schedule a meeting"

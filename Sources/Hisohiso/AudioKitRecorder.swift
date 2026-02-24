@@ -1,10 +1,13 @@
-import Accelerate
 import AudioKit
 import AVFoundation
 import Foundation
 
-/// Records audio using AudioKit with noise suppression
-/// Thread safety: `audioBuffer` is protected by `bufferLock` (NSLock).
+/// Records audio using AudioKit with noise suppression.
+///
+/// ## Thread safety
+/// `audioBuffer` is protected by `bufferLock` (NSLock). `isRecording` is only
+/// accessed from the main thread. `RawDataTap` callback delivers data on the
+/// audio render thread — only buffer append is done under lock.
 final class AudioKitRecorder: @unchecked Sendable {
     private var engine: AudioEngine?
     private var tap: RawDataTap?
@@ -130,36 +133,13 @@ final class AudioKitRecorder: @unchecked Sendable {
         onAudioChunk?(floatData)
     }
     
-    /// High-quality resampling using vDSP with polynomial interpolation
+    /// Resample audio using shared DSP utility.
     private func resample(_ samples: [Float], from sourceSampleRate: Double, to targetSampleRate: Double) -> [Float] {
-        let ratio = Float(sourceSampleRate / targetSampleRate)
-        let outputLength = Int(Float(samples.count) / ratio)
-
-        guard outputLength > 0 else { return [] }
-
-        var output = [Float](repeating: 0, count: outputLength)
-        var control = (0..<outputLength).map { Float($0) * ratio }
-        vDSP_vlint(samples, &control, 1, &output, 1, vDSP_Length(outputLength), vDSP_Length(samples.count))
-
-        return output
+        AudioDSP.resample(samples, from: sourceSampleRate, to: targetSampleRate)
     }
 
-    /// Normalize audio to optimal level for transcription using vDSP
+    /// Normalize audio using shared DSP utility.
     private func normalizeAudio(_ samples: [Float]) -> [Float] {
-        guard !samples.isEmpty else { return samples }
-
-        var peak: Float = 0
-        vDSP_maxmgv(samples, 1, &peak, vDSP_Length(samples.count))
-
-        guard peak > 0.001 else { return samples }
-
-        let targetPeak: Float = 0.9
-        let gain = min(targetPeak / peak, 10.0)
-
-        var output = [Float](repeating: 0, count: samples.count)
-        var gainVar = gain
-        vDSP_vsmul(samples, 1, &gainVar, &output, 1, vDSP_Length(samples.count))
-
-        return output
+        AudioDSP.normalize(samples)
     }
 }

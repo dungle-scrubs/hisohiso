@@ -2,17 +2,21 @@ import Foundation
 
 /// Formats transcribed text with smart capitalization, punctuation, and filler word removal
 struct TextFormatter {
-    /// Default filler words to remove
+    /// Default filler words to remove.
+    /// Only includes words/phrases that are almost never intentional in dictation.
+    /// Common words like "so", "well", "right", "actually" are excluded because
+    /// they frequently appear in legitimate speech.
     static let defaultFillerWords: Set<String> = [
-        "um", "uh", "er", "ah", "like", "you know", "i mean",
-        "basically", "actually", "literally", "so", "well",
-        "kind of", "sort of", "right"
+        "um", "uh", "er", "ah", "you know", "i mean",
+        "kind of", "sort of"
     ]
 
-    private let fillerWords: Set<String>
     private let removeFillers: Bool
     private let capitalizeFirst: Bool
     private let capitalizeSentences: Bool
+
+    /// Precompiled regexes for filler word removal, sorted longest-first.
+    private let fillerRegexes: [(pattern: NSRegularExpression, filler: String)]
 
     /// Initialize the text formatter
     /// - Parameters:
@@ -27,16 +31,30 @@ struct TextFormatter {
         capitalizeSentences: Bool = true
     ) {
         // Load from UserDefaults if not provided
+        let words: Set<String>
         if let fillerWords {
-            self.fillerWords = fillerWords
+            words = fillerWords
         } else if let saved = UserDefaults.standard.stringArray(forKey: "fillerWords") {
-            self.fillerWords = Set(saved)
+            words = Set(saved)
         } else {
-            self.fillerWords = Self.defaultFillerWords
+            words = Self.defaultFillerWords
         }
+
         self.removeFillers = removeFillers
         self.capitalizeFirst = capitalizeFirst
         self.capitalizeSentences = capitalizeSentences
+
+        // Precompile regexes sorted by length descending (match longer phrases first)
+        self.fillerRegexes = words
+            .sorted { $0.count > $1.count }
+            .compactMap { filler in
+                let escaped = NSRegularExpression.escapedPattern(for: filler)
+                let pattern = "\\b" + escaped + "\\b\\s*,?\\s*"
+                guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else {
+                    return nil
+                }
+                return (regex, filler)
+            }
     }
 
     /// Format the transcribed text
@@ -66,21 +84,12 @@ struct TextFormatter {
     private func removeFillerWords(from text: String) -> String {
         var result = text
 
-        // Sort by length descending to match longer phrases first
-        let sortedFillers = fillerWords.sorted { $0.count > $1.count }
-
-        for filler in sortedFillers {
-            // Use word boundary \b to avoid partial matches (e.g., "um" in "umbrella")
-            let escapedFiller = NSRegularExpression.escapedPattern(for: filler)
-            let pattern = "\\b" + escapedFiller + "\\b\\s*,?\\s*"
-
-            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
-                result = regex.stringByReplacingMatches(
-                    in: result,
-                    range: NSRange(result.startIndex..., in: result),
-                    withTemplate: ""
-                )
-            }
+        for (regex, _) in fillerRegexes {
+            result = regex.stringByReplacingMatches(
+                in: result,
+                range: NSRange(result.startIndex..., in: result),
+                withTemplate: ""
+            )
         }
 
         return result
