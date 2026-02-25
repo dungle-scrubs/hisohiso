@@ -204,7 +204,8 @@ final class HotkeyManager: ObservableObject {
 
     private func saveHotkey() {
         if let hotkey = currentHotkey,
-           let data = try? JSONEncoder().encode(hotkey) {
+           let data = try? JSONEncoder().encode(hotkey)
+        {
             UserDefaults.standard.set(data, for: .alternativeHotkey)
         } else {
             UserDefaults.standard.remove(for: .alternativeHotkey)
@@ -269,7 +270,7 @@ final class HotkeyRecorderView: NSView {
             clearButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             clearButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             clearButton.widthAnchor.constraint(equalToConstant: 16),
-            clearButton.heightAnchor.constraint(equalToConstant: 16)
+            clearButton.heightAnchor.constraint(equalToConstant: 16),
         ])
 
         updateLabel()

@@ -25,7 +25,8 @@ final class ModelManager: ObservableObject {
     init() {
         // Load saved model selection
         if let savedModel = UserDefaults.standard.string(for: .selectedModel),
-           let model = TranscriptionModel(rawValue: savedModel) {
+           let model = TranscriptionModel(rawValue: savedModel)
+        {
             selectedModel = model
         }
 

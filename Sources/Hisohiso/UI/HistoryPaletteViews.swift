@@ -164,7 +164,7 @@ final class HistoryRecordCellView: NSTableCellView {
 
             timestampLabel.topAnchor.constraint(equalTo: textLabel.bottomAnchor, constant: 2),
             timestampLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            timestampLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16)
+            timestampLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
         ])
     }
 

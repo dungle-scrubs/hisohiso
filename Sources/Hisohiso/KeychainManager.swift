@@ -66,7 +66,7 @@ final class KeychainManager: @unchecked Sendable {
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
             kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
+            kSecMatchLimit as String: kSecMatchLimitOne,
         ]
 
         var result: AnyObject?
@@ -94,7 +94,7 @@ final class KeychainManager: @unchecked Sendable {
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlocked
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlocked,
         ]
 
         let status = SecItemAdd(query as CFDictionary, nil)
@@ -108,10 +108,10 @@ final class KeychainManager: @unchecked Sendable {
             let updateQuery: [String: Any] = [
                 kSecClass as String: kSecClassGenericPassword,
                 kSecAttrService as String: service,
-                kSecAttrAccount as String: key
+                kSecAttrAccount as String: key,
             ]
             let updateAttrs: [String: Any] = [
-                kSecValueData as String: data
+                kSecValueData as String: data,
             ]
             let updateStatus = SecItemUpdate(updateQuery as CFDictionary, updateAttrs as CFDictionary)
             if updateStatus == errSecSuccess {
@@ -135,7 +135,7 @@ final class KeychainManager: @unchecked Sendable {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: key
+            kSecAttrAccount as String: key,
         ]
 
         let status = SecItemDelete(query as CFDictionary)

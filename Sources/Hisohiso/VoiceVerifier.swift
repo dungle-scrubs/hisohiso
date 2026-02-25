@@ -102,10 +102,10 @@ final class VoiceVerifier: @unchecked Sendable {
         // Create filterbank
         var filterbank = [[Float]](repeating: [Float](repeating: 0, count: nFft / 2 + 1), count: nMels)
         for m in 0..<nMels {
-            for k in binPoints[m] ..< binPoints[m + 1] where k < nFft / 2 + 1 {
+            for k in binPoints[m]..<binPoints[m + 1] where k < nFft / 2 + 1 {
                 filterbank[m][k] = Float(k - binPoints[m]) / Float(binPoints[m + 1] - binPoints[m])
             }
-            for k in binPoints[m + 1] ..< binPoints[m + 2] where k < nFft / 2 + 1 {
+            for k in binPoints[m + 1]..<binPoints[m + 2] where k < nFft / 2 + 1 {
                 filterbank[m][k] = Float(binPoints[m + 2] - k) / Float(binPoints[m + 2] - binPoints[m + 1])
             }
         }
@@ -118,7 +118,8 @@ final class VoiceVerifier: @unchecked Sendable {
     private func loadModel() {
         // Try to load from bundle first
         if let modelURL = Bundle.main.url(forResource: "SpeakerEmbedding", withExtension: "mlpackage") ??
-            Bundle.main.url(forResource: "SpeakerEmbedding", withExtension: "mlmodelc") {
+            Bundle.main.url(forResource: "SpeakerEmbedding", withExtension: "mlmodelc")
+        {
             do {
                 model = try MLModel(contentsOf: modelURL)
                 logInfo("VoiceVerifier: Loaded model from bundle")
@@ -135,7 +136,7 @@ final class VoiceVerifier: @unchecked Sendable {
             URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
                 .deletingLastPathComponent()
                 .deletingLastPathComponent()
-                .appendingPathComponent("Resources/SpeakerEmbedding.mlpackage")
+                .appendingPathComponent("Resources/SpeakerEmbedding.mlpackage"),
         ]
 
         for path in devPaths {
@@ -187,7 +188,7 @@ final class VoiceVerifier: @unchecked Sendable {
 
             // Extract and window the frame
             var windowedFrame = [Float](repeating: 0, count: nFft)
-            for i in 0 ..< winLength where start + i < audioSamples.count {
+            for i in 0..<winLength where start + i < audioSamples.count {
                 windowedFrame[i] = audioSamples[start + i] * window[i]
             }
 
@@ -464,7 +465,8 @@ final class VoiceVerifier: @unchecked Sendable {
     private func loadEnrolledEmbedding() {
         // Preferred: Keychain
         if let data = KeychainManager.shared.getData(forKey: embeddingKeychainKey),
-           let embedding = decodeEmbedding(from: data) {
+           let embedding = decodeEmbedding(from: data)
+        {
             lock.withLock { enrolledEmbedding = embedding }
             logInfo("VoiceVerifier: Loaded enrolled embedding from Keychain")
             return
@@ -472,7 +474,8 @@ final class VoiceVerifier: @unchecked Sendable {
 
         // Legacy migration path: file -> Keychain
         if let data = try? Data(contentsOf: embeddingFileURL),
-           let embedding = decodeEmbedding(from: data) {
+           let embedding = decodeEmbedding(from: data)
+        {
             lock.withLock { enrolledEmbedding = embedding }
             logInfo("VoiceVerifier: Loaded enrolled embedding from legacy file, migrating to Keychain")
             switch KeychainManager.shared.setData(data, forKey: embeddingKeychainKey) {

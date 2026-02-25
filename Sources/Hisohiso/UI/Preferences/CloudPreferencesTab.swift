@@ -150,14 +150,20 @@ final class CloudPreferencesTab: NSView {
 
     @objc private func openAIKeyChanged() {
         let key = openAIKeyField.stringValue.trimmingCharacters(in: .whitespaces)
-        if key.isEmpty { _ = KeychainManager.shared.deleteAPIKey(.openAI) } else { _ = KeychainManager.shared.setAPIKey(key, type: .openAI) }
+        if key.isEmpty { _ = KeychainManager.shared.deleteAPIKey(.openAI) } else { _ = KeychainManager.shared.setAPIKey(
+            key,
+            type: .openAI
+        ) }
         openAIKeyField.stringValue = ""
         updateKeyStatus()
     }
 
     @objc private func groqKeyChanged() {
         let key = groqKeyField.stringValue.trimmingCharacters(in: .whitespaces)
-        if key.isEmpty { _ = KeychainManager.shared.deleteAPIKey(.groq) } else { _ = KeychainManager.shared.setAPIKey(key, type: .groq) }
+        if key.isEmpty { _ = KeychainManager.shared.deleteAPIKey(.groq) } else { _ = KeychainManager.shared.setAPIKey(
+            key,
+            type: .groq
+        ) }
         groqKeyField.stringValue = ""
         updateKeyStatus()
     }

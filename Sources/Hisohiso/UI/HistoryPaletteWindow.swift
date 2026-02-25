@@ -99,7 +99,7 @@ final class HistoryPaletteWindow: NSPanel {
         // Style placeholder
         let placeholderAttrs: [NSAttributedString.Key: Any] = [
             .foregroundColor: NSColor(white: 0.5, alpha: 1.0),
-            .font: NSFont.systemFont(ofSize: 18, weight: .regular)
+            .font: NSFont.systemFont(ofSize: 18, weight: .regular),
         ]
         searchField.placeholderAttributedString = NSAttributedString(
             string: "Search history...",
@@ -181,7 +181,7 @@ final class HistoryPaletteWindow: NSPanel {
         // Local monitor: catches clicks within the app - check if outside our window
         localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [
             .leftMouseDown,
-            .rightMouseDown
+            .rightMouseDown,
         ]) { [weak self] event in
             guard let self, isVisible else { return event }
 
@@ -205,7 +205,7 @@ final class HistoryPaletteWindow: NSPanel {
         // Global monitor: catches clicks outside the app entirely
         globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [
             .leftMouseDown,
-            .rightMouseDown
+            .rightMouseDown,
         ]) { [weak self] _ in
             guard let self, isVisible else { return }
             dismiss()
@@ -228,7 +228,7 @@ final class HistoryPaletteWindow: NSPanel {
             .mouseMoved,
             .mouseEntered,
             .mouseExited,
-            .scrollWheel
+            .scrollWheel,
         ]) { [weak self] event in
             guard let self, isVisible else { return event }
 

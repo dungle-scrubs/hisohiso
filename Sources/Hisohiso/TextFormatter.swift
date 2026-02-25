@@ -8,7 +8,7 @@ struct TextFormatter {
     /// they frequently appear in legitimate speech.
     static let defaultFillerWords: Set<String> = [
         "um", "uh", "er", "ah", "you know", "i mean",
-        "kind of", "sort of"
+        "kind of", "sort of",
     ]
 
     private let removeFillers: Bool

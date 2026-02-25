@@ -129,11 +129,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
+            guard let self else { return }
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 do {
-                    try await self.dictationController?.reloadSelectedModel()
-                    self.hasPendingModelReload = false
+                    try await dictationController?.reloadSelectedModel()
+                    hasPendingModelReload = false
                 } catch let dictationError as DictationError {
                     if case .cannotChangeModelWhileBusy = dictationError {
                         self.hasPendingModelReload = true
@@ -152,7 +153,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
+            guard let self else { return }
+            Task { @MainActor [weak self] in
                 self?.applySelectedMicrophonePreference()
             }
         }
@@ -317,16 +319,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // When wake word detected, start recording
         wakeWordManager?.onWakeWordDetected = { [weak self] in
-            Task { @MainActor in
+            guard let self else { return }
+            Task { @MainActor [weak self] in
                 guard let self else { return }
-                guard self.dictationController?.stateManager.isIdle == true else { return }
+                guard dictationController?.stateManager.isIdle == true else { return }
 
                 logInfo("Wake word triggered recording")
                 // Pause monitoring and wake word listening while recording
-                self.dictationController?.audioRecorder.pauseMonitoring()
-                self.wakeWordManager?.pauseListening()
+                dictationController?.audioRecorder.pauseMonitoring()
+                wakeWordManager?.pauseListening()
                 // Start recording with auto-stop on silence
-                await self.dictationController?.startRecording(fromWakeWord: true)
+                await dictationController?.startRecording(fromWakeWord: true)
             }
         }
 
@@ -361,23 +364,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
+            guard let self else { return }
+            Task { @MainActor [weak self] in
                 guard let self else { return }
 
                 let isEnabled = UserDefaults.standard.bool(for: .wakeWordEnabled)
-                self.wakeWordManager?.isEnabled = isEnabled
+                wakeWordManager?.isEnabled = isEnabled
 
                 if isEnabled {
                     do {
-                        try await self.wakeWordManager?.initialize()
-                        try self.dictationController?.audioRecorder.startMonitoring()
-                        self.wakeWordManager?.startListening()
+                        try await wakeWordManager?.initialize()
+                        try dictationController?.audioRecorder.startMonitoring()
+                        wakeWordManager?.startListening()
                     } catch {
                         logError("Failed to start wake word: \(error)")
                     }
                 } else {
-                    self.wakeWordManager?.stopListening()
-                    self.dictationController?.audioRecorder.stopMonitoring()
+                    wakeWordManager?.stopListening()
+                    dictationController?.audioRecorder.stopMonitoring()
                 }
             }
         }
