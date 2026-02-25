@@ -39,8 +39,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hasCompletedOnboardingKey = SettingsKey.hasCompletedOnboarding
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Install crash reporter FIRST — before anything else can fail
+        CrashReporter.install()
+
         logInfo("Hisohiso starting...")
         logInfo("Log file: \(Logger.shared.logFilePath)")
+
+        // Check for previous crash and archive if found
+        if let crashArchive = CrashReporter.checkPreviousCrash() {
+            logWarning("Previous session crashed. Archive: \(crashArchive.path)")
+        }
 
         // Handle CLI arguments (e.g., --history from Sinew click)
         handleLaunchArguments()
@@ -75,7 +83,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NotificationCenter.default.removeObserver(observer)
         }
 
-        logInfo("Hisohiso shutting down")
+        // Mark clean shutdown BEFORE logging — synchronous write
+        CrashReporter.markCleanShutdown()
+        // Use synchronous log so it survives process exit
+        Logger.shared.logSync("Hisohiso shutting down (clean)", level: .info)
     }
 
     /// Handle reopen (e.g., clicking dock icon or `open -a Hisohiso`)
