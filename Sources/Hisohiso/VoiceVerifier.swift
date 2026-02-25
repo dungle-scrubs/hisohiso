@@ -73,13 +73,13 @@ final class VoiceVerifier: @unchecked Sendable {
     // MARK: - Mel Filterbank
 
     private func computeMelFilterbank() {
-        // Convert Hz to Mel scale
+        /// Convert Hz to Mel scale
         func hzToMel(_ hz: Float) -> Float {
-            return 2595 * log10(1 + hz / 700)
+            2595 * log10(1 + hz / 700)
         }
 
         func melToHz(_ mel: Float) -> Float {
-            return 700 * (pow(10, mel / 2595) - 1)
+            700 * (pow(10, mel / 2595) - 1)
         }
 
         let fMin: Float = 0
@@ -91,7 +91,7 @@ final class VoiceVerifier: @unchecked Sendable {
         let nMels = Self.nMels
         let nFft = Self.nFft
         var melPoints = [Float](repeating: 0, count: nMels + 2)
-        for i in 0 ..< nMels + 2 {
+        for i in 0..<nMels + 2 {
             let mel = melMin + Float(i) * (melMax - melMin) / Float(nMels + 1)
             melPoints[i] = melToHz(mel)
         }
@@ -101,16 +101,12 @@ final class VoiceVerifier: @unchecked Sendable {
 
         // Create filterbank
         var filterbank = [[Float]](repeating: [Float](repeating: 0, count: nFft / 2 + 1), count: nMels)
-        for m in 0 ..< nMels {
-            for k in binPoints[m] ..< binPoints[m + 1] {
-                if k < nFft / 2 + 1 {
-                    filterbank[m][k] = Float(k - binPoints[m]) / Float(binPoints[m + 1] - binPoints[m])
-                }
+        for m in 0..<nMels {
+            for k in binPoints[m]..<binPoints[m + 1] where k < nFft / 2 + 1 {
+                filterbank[m][k] = Float(k - binPoints[m]) / Float(binPoints[m + 1] - binPoints[m])
             }
-            for k in binPoints[m + 1] ..< binPoints[m + 2] {
-                if k < nFft / 2 + 1 {
-                    filterbank[m][k] = Float(binPoints[m + 2] - k) / Float(binPoints[m + 2] - binPoints[m + 1])
-                }
+            for k in binPoints[m + 1]..<binPoints[m + 2] where k < nFft / 2 + 1 {
+                filterbank[m][k] = Float(binPoints[m + 2] - k) / Float(binPoints[m + 2] - binPoints[m + 1])
             }
         }
 
@@ -122,7 +118,8 @@ final class VoiceVerifier: @unchecked Sendable {
     private func loadModel() {
         // Try to load from bundle first
         if let modelURL = Bundle.main.url(forResource: "SpeakerEmbedding", withExtension: "mlpackage") ??
-            Bundle.main.url(forResource: "SpeakerEmbedding", withExtension: "mlmodelc") {
+            Bundle.main.url(forResource: "SpeakerEmbedding", withExtension: "mlmodelc")
+        {
             do {
                 model = try MLModel(contentsOf: modelURL)
                 logInfo("VoiceVerifier: Loaded model from bundle")
@@ -139,7 +136,7 @@ final class VoiceVerifier: @unchecked Sendable {
             URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
                 .deletingLastPathComponent()
                 .deletingLastPathComponent()
-                .appendingPathComponent("Resources/SpeakerEmbedding.mlpackage")
+                .appendingPathComponent("Resources/SpeakerEmbedding.mlpackage"),
         ]
 
         for path in devPaths {
@@ -186,15 +183,13 @@ final class VoiceVerifier: @unchecked Sendable {
         }
         defer { vDSP_destroy_fftsetup(fftSetup) }
 
-        for frame in 0 ..< nFrames {
+        for frame in 0..<nFrames {
             let start = frame * hopLength
 
             // Extract and window the frame
             var windowedFrame = [Float](repeating: 0, count: nFft)
-            for i in 0 ..< winLength {
-                if start + i < audioSamples.count {
-                    windowedFrame[i] = audioSamples[start + i] * window[i]
-                }
+            for i in 0..<winLength where start + i < audioSamples.count {
+                windowedFrame[i] = audioSamples[start + i] * window[i]
             }
 
             // Compute FFT
@@ -221,15 +216,15 @@ final class VoiceVerifier: @unchecked Sendable {
 
             // Compute power spectrum
             var powerSpectrum = [Float](repeating: 0, count: nFft / 2 + 1)
-            for i in 0 ..< nFft / 2 {
+            for i in 0..<nFft / 2 {
                 powerSpectrum[i] = realPart[i] * realPart[i] + imagPart[i] * imagPart[i]
             }
 
             // Apply mel filterbank
             var melFrame = [Float](repeating: 0, count: Self.nMels)
-            for m in 0 ..< Self.nMels {
+            for m in 0..<Self.nMels {
                 var sum: Float = 0
-                for k in 0 ..< min(powerSpectrum.count, filterbank[m].count) {
+                for k in 0..<min(powerSpectrum.count, filterbank[m].count) {
                     sum += powerSpectrum[k] * filterbank[m][k]
                 }
                 // Log mel spectrogram
@@ -267,7 +262,7 @@ final class VoiceVerifier: @unchecked Sendable {
         // automatically cancelled if the parent is cancelled.
         return try await Task.detached(priority: .userInitiated) { [self] in
             // Compute mel spectrogram
-            guard let melSpec = self.computeMelSpectrogram(from: audioSamples) else {
+            guard let melSpec = computeMelSpectrogram(from: audioSamples) else {
                 throw VoiceVerifierError.melComputationFailed
             }
 
@@ -387,7 +382,9 @@ final class VoiceVerifier: @unchecked Sendable {
         let similarity = cosineSimilarity(enrolled, normalized)
         let isMatch = similarity >= threshold
 
-        logInfo("VoiceVerifier: Similarity=\(String(format: "%.3f", similarity)), Threshold=\(threshold), Match=\(isMatch)")
+        logInfo(
+            "VoiceVerifier: Similarity=\(String(format: "%.3f", similarity)), Threshold=\(threshold), Match=\(isMatch)"
+        )
 
         return VerificationResult(
             isMatch: isMatch,
@@ -460,7 +457,7 @@ final class VoiceVerifier: @unchecked Sendable {
             logDebug("VoiceVerifier: Saved embedding to Keychain")
             // Cleanup legacy file if present.
             try? FileManager.default.removeItem(at: embeddingFileURL)
-        case .failure(let error):
+        case let .failure(error):
             logError("VoiceVerifier: Failed to save embedding to Keychain: \(error.localizedDescription)")
         }
     }
@@ -484,7 +481,7 @@ final class VoiceVerifier: @unchecked Sendable {
             switch KeychainManager.shared.setData(data, forKey: embeddingKeychainKey) {
             case .success:
                 try? FileManager.default.removeItem(at: embeddingFileURL)
-            case .failure(let error):
+            case let .failure(error):
                 logWarning("VoiceVerifier: Failed to migrate embedding to Keychain: \(error.localizedDescription)")
             }
             return
@@ -538,7 +535,7 @@ enum VoiceVerifierError: Error, LocalizedError {
         switch self {
         case .modelNotLoaded:
             return "Speaker verification model not loaded"
-        case .insufficientAudio(let required, let provided):
+        case let .insufficientAudio(required, provided):
             let reqSec = Double(required) / AppConstants.targetSampleRate
             let provSec = Double(provided) / AppConstants.targetSampleRate
             return String(format: "Need %.1fs of audio, only %.1fs provided", reqSec, provSec)

@@ -17,7 +17,9 @@ final class ModelPreferencesTab: NSView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     private func setupViews() {
         var y = 260
@@ -103,7 +105,8 @@ final class ModelPreferencesTab: NSView {
     /// Load current settings into controls.
     func loadSettings() {
         selectModelInPopup(modelManager.selectedModel)
-        let fillerWords = UserDefaults.standard.stringArray(for: .fillerWords) ?? Array(TextFormatter.defaultFillerWords)
+        let fillerWords = UserDefaults.standard
+            .stringArray(for: .fillerWords) ?? Array(TextFormatter.defaultFillerWords)
         fillerWordsField.stringValue = fillerWords.joined(separator: ", ")
         updateModelUI()
     }

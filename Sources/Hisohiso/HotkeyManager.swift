@@ -21,20 +21,28 @@ struct KeyCombo: Codable, Equatable, Sendable {
     /// Create from CGEventFlags
     init(keyCode: UInt32, flags: CGEventFlags) {
         self.keyCode = keyCode
-        self.modifiers = KeyCombo.carbonModifiers(from: flags)
+        modifiers = KeyCombo.carbonModifiers(from: flags)
     }
 
     /// Check if modifiers contain Command
-    var hasCommand: Bool { modifiers & UInt32(cmdKey) != 0 }
+    var hasCommand: Bool {
+        modifiers & UInt32(cmdKey) != 0
+    }
 
     /// Check if modifiers contain Option
-    var hasOption: Bool { modifiers & UInt32(optionKey) != 0 }
+    var hasOption: Bool {
+        modifiers & UInt32(optionKey) != 0
+    }
 
     /// Check if modifiers contain Control
-    var hasControl: Bool { modifiers & UInt32(controlKey) != 0 }
+    var hasControl: Bool {
+        modifiers & UInt32(controlKey) != 0
+    }
 
     /// Check if modifiers contain Shift
-    var hasShift: Bool { modifiers & UInt32(shiftKey) != 0 }
+    var hasShift: Bool {
+        modifiers & UInt32(shiftKey) != 0
+    }
 
     /// Human-readable display string (e.g., "⌃⌥Space")
     var displayString: String {
@@ -134,7 +142,7 @@ final class HotkeyManager: ObservableObject {
             eventTypes: [.keyDown, .keyUp]
         ) { [weak self] event, type in
             guard let self else { return false }
-            return self.handleKeyEvent(event, isDown: type == .keyDown)
+            return handleKeyEvent(event, isDown: type == .keyDown)
         }
 
         EventTapManager.shared.start()
@@ -168,14 +176,14 @@ final class HotkeyManager: ObservableObject {
         Task { @MainActor [weak self] in
             guard let self else { return }
 
-            if isDown && !self.isHotkeyPressed {
-                self.isHotkeyPressed = true
+            if isDown, !isHotkeyPressed {
+                isHotkeyPressed = true
                 logDebug("Alternative hotkey pressed: \(hotkey.displayString)")
-                self.onHotkeyDown?()
-            } else if !isDown && self.isHotkeyPressed {
-                self.isHotkeyPressed = false
+                onHotkeyDown?()
+            } else if !isDown, isHotkeyPressed {
+                isHotkeyPressed = false
                 logDebug("Alternative hotkey released: \(hotkey.displayString)")
-                self.onHotkeyUp?()
+                onHotkeyUp?()
             }
         }
 
@@ -345,7 +353,9 @@ final class HotkeyRecorderView: NSView {
         onHotkeyRecorded?(nil)
     }
 
-    override var acceptsFirstResponder: Bool { true }
+    override var acceptsFirstResponder: Bool {
+        true
+    }
 
     override func resignFirstResponder() -> Bool {
         stopRecording()

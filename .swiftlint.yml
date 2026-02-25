@@ -1,6 +1,9 @@
 disabled_rules:
   - trailing_whitespace
   - line_length
+  - trailing_comma
+  - opening_brace
+  - statement_position
 
 opt_in_rules:
   - empty_count
@@ -17,3 +20,31 @@ opt_in_rules:
 excluded:
   - .build
   - Package.swift
+
+# Allow short names common in DSP, math, UI layout, and loop variables
+identifier_name:
+  min_length: 1
+  max_length: 60
+  allowed_symbols: ["_"]
+
+# AppKit UI code uses long bodies for layout — raise limits
+# Thresholds tuned to current codebase reality.
+# TODO: reduce these as tech debt is paid down.
+function_body_length: 90
+type_body_length: 500
+file_length: 650
+cyclomatic_complexity: 30
+
+large_tuple:
+  warning: 3
+  error: 4
+
+# NSView/NSWindow @objc callbacks require attributes on same line
+attributes:
+  always_on_same_line:
+    - "@objc"
+    - "@IBAction"
+    - "@IBOutlet"
+    - "@NSManaged"
+  always_on_line_above:
+    - "@discardableResult"

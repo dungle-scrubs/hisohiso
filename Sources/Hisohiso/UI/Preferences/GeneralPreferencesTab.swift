@@ -17,7 +17,9 @@ final class GeneralPreferencesTab: NSView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     private func setupViews() {
         var y = 280
@@ -33,18 +35,30 @@ final class GeneralPreferencesTab: NSView {
         addSubview(microphonePopup)
         y -= 40
 
-        useAudioKitToggle = NSButton(checkboxWithTitle: "Use AudioKit (better noise handling)", target: self, action: #selector(useAudioKitChanged))
+        useAudioKitToggle = NSButton(
+            checkboxWithTitle: "Use AudioKit (better noise handling)",
+            target: self,
+            action: #selector(useAudioKitChanged)
+        )
         useAudioKitToggle.frame = NSRect(x: 20, y: y, width: 400, height: 20)
         addSubview(useAudioKitToggle)
         y -= 30
 
-        audioFeedbackToggle = NSButton(checkboxWithTitle: "Play sounds on start/stop recording", target: self, action: #selector(audioFeedbackChanged))
+        audioFeedbackToggle = NSButton(
+            checkboxWithTitle: "Play sounds on start/stop recording",
+            target: self,
+            action: #selector(audioFeedbackChanged)
+        )
         audioFeedbackToggle.frame = NSRect(x: 20, y: y, width: 400, height: 20)
         addSubview(audioFeedbackToggle)
         y -= 30
 
         let launchTitle = supportsLaunchAtLogin ? "Launch at login" : "Launch at login (app bundle only)"
-        launchAtLoginToggle = NSButton(checkboxWithTitle: launchTitle, target: self, action: #selector(launchAtLoginChanged))
+        launchAtLoginToggle = NSButton(
+            checkboxWithTitle: launchTitle,
+            target: self,
+            action: #selector(launchAtLoginChanged)
+        )
         launchAtLoginToggle.isEnabled = supportsLaunchAtLogin
         launchAtLoginToggle.frame = NSRect(x: 20, y: y, width: 420, height: 20)
         addSubview(launchAtLoginToggle)
@@ -61,7 +75,11 @@ final class GeneralPreferencesTab: NSView {
         addSubview(sectionLabel)
         y -= 30
 
-        floatingPillToggle = NSButton(checkboxWithTitle: "Show floating pill", target: self, action: #selector(floatingPillToggleChanged))
+        floatingPillToggle = NSButton(
+            checkboxWithTitle: "Show floating pill",
+            target: self,
+            action: #selector(floatingPillToggleChanged)
+        )
         floatingPillToggle.frame = NSRect(x: 20, y: y, width: 400, height: 20)
         addSubview(floatingPillToggle)
         y -= 26
@@ -71,14 +89,16 @@ final class GeneralPreferencesTab: NSView {
         addSubview(sinewToggle)
         y -= 22
 
-        let sinewStatus = NSTextField(labelWithString: SinewBridge.shared.isAvailable ? "✓ Sinew detected" : "Sinew not running")
+        let sinewStatus = NSTextField(labelWithString: SinewBridge.shared
+            .isAvailable ? "✓ Sinew detected" : "Sinew not running")
         sinewStatus.frame = NSRect(x: 40, y: y, width: 200, height: 16)
         sinewStatus.font = .systemFont(ofSize: 11)
         sinewStatus.textColor = SinewBridge.shared.isAvailable ? .systemGreen : .secondaryLabelColor
         addSubview(sinewStatus)
         y -= 22
 
-        let hint = NSTextField(wrappingLabelWithString: "You can enable both to see recording status in multiple places.")
+        let hint =
+            NSTextField(wrappingLabelWithString: "You can enable both to see recording status in multiple places.")
         hint.frame = NSRect(x: 40, y: y - 10, width: 380, height: 30)
         hint.font = .systemFont(ofSize: 11)
         hint.textColor = .tertiaryLabelColor
@@ -88,7 +108,11 @@ final class GeneralPreferencesTab: NSView {
     /// Load current settings into controls.
     func loadSettings() {
         let defaults = UserDefaults.standard
-        audioFeedbackToggle.state = (defaults.hasValue(for: .audioFeedbackEnabled) ? defaults.bool(for: .audioFeedbackEnabled) : true) ? .on : .off
+        audioFeedbackToggle
+            .state = (
+                defaults.hasValue(for: .audioFeedbackEnabled) ? defaults.bool(for: .audioFeedbackEnabled) : true
+            ) ?
+            .on : .off
         launchAtLoginToggle.state = supportsLaunchAtLogin && SMAppService.mainApp.status == .enabled ? .on : .off
         floatingPillToggle.state = SinewBridge.shared.showFloatingPill ? .on : .off
         sinewToggle.state = SinewBridge.shared.useSinewVisualization ? .on : .off

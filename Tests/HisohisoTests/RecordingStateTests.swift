@@ -1,5 +1,5 @@
-import XCTest
 @testable import Hisohiso
+import XCTest
 
 final class RecordingStateTests: XCTestCase {
     func testStateEquality() {
@@ -12,7 +12,7 @@ final class RecordingStateTests: XCTestCase {
     }
 
     @MainActor
-    func testStateManagerTransitions() async {
+    func testStateManagerTransitions() {
         let manager = RecordingStateManager()
 
         XCTAssertTrue(manager.isIdle)
@@ -38,7 +38,7 @@ final class RecordingStateTests: XCTestCase {
     }
 
     @MainActor
-    func testRetryCallback() async {
+    func testRetryCallback() {
         let manager = RecordingStateManager()
         var retryCalled = false
 

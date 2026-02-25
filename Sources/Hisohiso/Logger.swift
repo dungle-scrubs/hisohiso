@@ -11,10 +11,10 @@ enum LogLevel: String {
 
     var osLogType: OSLogType {
         switch self {
-        case .debug: return .debug
-        case .info: return .info
-        case .warning: return .default
-        case .error: return .error
+        case .debug: .debug
+        case .info: .info
+        case .warning: .default
+        case .error: .error
         }
     }
 }
@@ -100,14 +100,60 @@ final class Logger: @unchecked Sendable {
     }
 
     /// Path to the current log file (for tail -f)
-    var logFilePath: String { logFileURL.path }
+    var logFilePath: String {
+        logFileURL.path
+    }
+
+    /// Path to the logs directory.
+    var logsDirectory: URL {
+        logFileURL.deletingLastPathComponent()
+    }
+
+    /// Write a log line **synchronously** on the calling thread.
+    ///
+    /// Only use this from crash/exit handlers where the dispatch queue may
+    /// never execute. This bypasses the serial queue and writes directly.
+    ///
+    /// - Parameters:
+    ///   - message: The message to log
+    ///   - level: Log level
+    ///   - file: Source file (auto-filled)
+    ///   - function: Function name (auto-filled)
+    ///   - line: Line number (auto-filled)
+    func logSync(
+        _ message: String,
+        level: LogLevel = .error,
+        file: String = #file,
+        function: String = #function,
+        line: Int = #line
+    ) {
+        let fileName = URL(fileURLWithPath: file).lastPathComponent
+
+        // Write to OSLog first (always safe)
+        os_log("%{public}@", log: osLog, type: level.osLogType, message)
+
+        // Synchronous file write — no dispatch queue
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate, .withFullTime, .withFractionalSeconds]
+        let timestamp = formatter.string(from: Date())
+        let logLine = "[\(timestamp)] [\(level.rawValue)] [\(fileName):\(line)] \(function) - \(message)\n"
+
+        if let data = logLine.data(using: .utf8) {
+            // Use the queue synchronously to avoid racing with async writes
+            queue.sync {
+                fileHandle?.write(data)
+                try? fileHandle?.synchronize()
+            }
+        }
+    }
 
     // MARK: - Log Rotation
 
     /// Remove log files older than `maxLogAgeDays`.
     private func pruneOldLogs(in directory: URL) {
         let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey]) else {
+        guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey])
+        else {
             return
         }
 

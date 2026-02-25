@@ -1,20 +1,22 @@
+import FluidAudio
 import Foundation
 import WhisperKit
-import FluidAudio
 
 // MARK: - Transcription Backend
 
 /// Transcription backend type
 enum TranscriptionBackend: String, CaseIterable, Identifiable {
-    case whisper = "whisper"
-    case parakeet = "parakeet"
+    case whisper
+    case parakeet
 
-    var id: String { rawValue }
+    var id: String {
+        rawValue
+    }
 
     var displayName: String {
         switch self {
-        case .whisper: return "Whisper (WhisperKit)"
-        case .parakeet: return "Parakeet (FluidAudio)"
+        case .whisper: "Whisper (WhisperKit)"
+        case .parakeet: "Parakeet (FluidAudio)"
         }
     }
 }
@@ -34,34 +36,36 @@ enum TranscriptionModel: String, CaseIterable, Identifiable {
     case parakeetV2 = "parakeet-tdt-0.6b-v2"
     case parakeetV3 = "parakeet-tdt-0.6b-v3"
 
-    var id: String { rawValue }
+    var id: String {
+        rawValue
+    }
 
     var backend: TranscriptionBackend {
         switch self {
         case .whisperTiny, .whisperBase, .whisperSmall, .whisperLargeV3Turbo, .whisperDistilLargeV3:
-            return .whisper
+            .whisper
         case .parakeetV2, .parakeetV3:
-            return .parakeet
+            .parakeet
         }
     }
 
     var displayName: String {
         switch self {
-        case .whisperTiny: return "Whisper Tiny (~66 MB)"
-        case .whisperBase: return "Whisper Base English (~105 MB)"
-        case .whisperSmall: return "Whisper Small English (~330 MB)"
-        case .whisperLargeV3Turbo: return "Whisper Large V3 Turbo (~954 MB)"
-        case .whisperDistilLargeV3: return "Whisper Distil Large V3 (~800 MB)"
-        case .parakeetV2: return "Parakeet v2 English (~2.6 GB) ⭐"
-        case .parakeetV3: return "Parakeet v3 Multilingual (~2.7 GB)"
+        case .whisperTiny: "Whisper Tiny (~66 MB)"
+        case .whisperBase: "Whisper Base English (~105 MB)"
+        case .whisperSmall: "Whisper Small English (~330 MB)"
+        case .whisperLargeV3Turbo: "Whisper Large V3 Turbo (~954 MB)"
+        case .whisperDistilLargeV3: "Whisper Distil Large V3 (~800 MB)"
+        case .parakeetV2: "Parakeet v2 English (~2.6 GB) ⭐"
+        case .parakeetV3: "Parakeet v3 Multilingual (~2.7 GB)"
         }
     }
 
     var asrModelVersion: AsrModelVersion? {
         switch self {
-        case .parakeetV2: return .v2
-        case .parakeetV3: return .v3
-        default: return nil
+        case .parakeetV2: .v2
+        case .parakeetV3: .v3
+        default: nil
         }
     }
 
@@ -92,15 +96,15 @@ enum TranscriberError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notInitialized:
-            return "Transcriber not initialized"
-        case .modelNotFound(let model):
-            return "Model not found: \(model)"
-        case .transcriptionFailed(let error):
-            return "Transcription failed: \(error.localizedDescription)"
+            "Transcriber not initialized"
+        case let .modelNotFound(model):
+            "Model not found: \(model)"
+        case let .transcriptionFailed(error):
+            "Transcription failed: \(error.localizedDescription)"
         case .timeout:
-            return "Transcription timed out"
+            "Transcription timed out"
         case .invalidAudioData:
-            return "Invalid or too short audio data"
+            "Invalid or too short audio data"
         }
     }
 }
@@ -146,7 +150,7 @@ actor Transcriber {
     /// Cloud providers for fallback, in priority order.
     private let cloudProviders: [(type: CloudProviderType, provider: CloudProvider)] = [
         (.openAI, OpenAIProvider()),
-        (.groq, GroqProvider())
+        (.groq, GroqProvider()),
     ]
 
     /// Cloud fallback settings
@@ -292,7 +296,7 @@ actor Transcriber {
 
     /// Get list of configured cloud providers
     var configuredCloudProviders: [CloudProvider] {
-        cloudProviders.filter { $0.provider.isConfigured }.map(\.provider)
+        cloudProviders.filter(\.provider.isConfigured).map(\.provider)
     }
 
     private func transcribeWithWhisper(_ audioSamples: [Float]) async throws -> String {

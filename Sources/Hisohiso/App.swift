@@ -5,7 +5,8 @@ import SwiftUI
 /// Main application entry point
 @main
 struct HisohisoApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @NSApplicationDelegateAdaptor(AppDelegate.self)
+    var appDelegate
 
     var body: some Scene {
         // Menu bar app - no main window
@@ -39,8 +40,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hasCompletedOnboardingKey = SettingsKey.hasCompletedOnboarding
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Install crash reporter FIRST — before anything else can fail
+        CrashReporter.install()
+
         logInfo("Hisohiso starting...")
         logInfo("Log file: \(Logger.shared.logFilePath)")
+
+        // Check for previous crash and archive if found
+        if let crashArchive = CrashReporter.checkPreviousCrash() {
+            logWarning("Previous session crashed. Archive: \(crashArchive.path)")
+        }
 
         // Handle CLI arguments (e.g., --history from Sinew click)
         handleLaunchArguments()
@@ -75,20 +84,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NotificationCenter.default.removeObserver(observer)
         }
 
-        logInfo("Hisohiso shutting down")
+        // Mark clean shutdown BEFORE logging — synchronous write
+        CrashReporter.markCleanShutdown()
+        // Use synchronous log so it survives process exit
+        Logger.shared.logSync("Hisohiso shutting down (clean)", level: .info)
     }
 
     /// Handle reopen (e.g., clicking dock icon or `open -a Hisohiso`)
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        return true
+        true
     }
 
     /// Handle Apple Events (for `open -a Hisohiso --args --history`)
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls {
-            if url.scheme == "hisohiso" {
-                handleURL(url)
-            }
+        for url in urls where url.scheme == "hisohiso" {
+            handleURL(url)
         }
     }
 
@@ -119,11 +129,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
+            guard let self else { return }
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 do {
-                    try await self.dictationController?.reloadSelectedModel()
-                    self.hasPendingModelReload = false
+                    try await dictationController?.reloadSelectedModel()
+                    hasPendingModelReload = false
                 } catch let dictationError as DictationError {
                     if case .cannotChangeModelWhileBusy = dictationError {
                         self.hasPendingModelReload = true
@@ -142,7 +153,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
+            guard let self else { return }
+            Task { @MainActor [weak self] in
                 self?.applySelectedMicrophonePreference()
             }
         }
@@ -260,8 +272,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             Task { @MainActor [weak self] in
                                 guard let self else { return }
                                 do {
-                                    try await self.dictationController?.reloadSelectedModel()
-                                    self.hasPendingModelReload = false
+                                    try await dictationController?.reloadSelectedModel()
+                                    hasPendingModelReload = false
                                     logInfo("Applied pending model change")
                                 } catch {
                                     logError("Failed to apply pending model change: \(error)")
@@ -299,27 +311,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupWakeWord() async {
         logInfo("Setting up wake word manager...")
         wakeWordManager = WakeWordManager()
-        
+
         // Connect AudioRecorder's monitoring to WakeWordManager
         dictationController?.audioRecorder.onMonitoringSamples = { [weak self] samples, sampleRate in
             self?.wakeWordManager?.processAudioSamples(samples, sampleRate: sampleRate)
         }
-        
+
         // When wake word detected, start recording
         wakeWordManager?.onWakeWordDetected = { [weak self] in
-            Task { @MainActor in
+            guard let self else { return }
+            Task { @MainActor [weak self] in
                 guard let self else { return }
-                guard self.dictationController?.stateManager.isIdle == true else { return }
-                
+                guard dictationController?.stateManager.isIdle == true else { return }
+
                 logInfo("Wake word triggered recording")
                 // Pause monitoring and wake word listening while recording
-                self.dictationController?.audioRecorder.pauseMonitoring()
-                self.wakeWordManager?.pauseListening()
+                dictationController?.audioRecorder.pauseMonitoring()
+                wakeWordManager?.pauseListening()
                 // Start recording with auto-stop on silence
-                await self.dictationController?.startRecording(fromWakeWord: true)
+                await dictationController?.startRecording(fromWakeWord: true)
             }
         }
-        
+
         // Initialize Whisper tiny for wake word
         if wakeWordManager?.isEnabled == true {
             do {
@@ -328,7 +341,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 logError("Failed to initialize wake word: \(error)")
             }
         }
-        
+
         // Start monitoring if enabled
         logInfo("Wake word enabled: \(wakeWordManager?.isEnabled ?? false)")
         if wakeWordManager?.isEnabled == true {
@@ -340,7 +353,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 logError("Failed to start wake word monitoring: \(error)")
             }
         }
-        
+
         // Listen for settings changes
         if let observer = wakeWordSettingsObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -351,23 +364,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
+            guard let self else { return }
+            Task { @MainActor [weak self] in
                 guard let self else { return }
 
                 let isEnabled = UserDefaults.standard.bool(for: .wakeWordEnabled)
-                self.wakeWordManager?.isEnabled = isEnabled
+                wakeWordManager?.isEnabled = isEnabled
 
                 if isEnabled {
                     do {
-                        try await self.wakeWordManager?.initialize()
-                        try self.dictationController?.audioRecorder.startMonitoring()
-                        self.wakeWordManager?.startListening()
+                        try await wakeWordManager?.initialize()
+                        try dictationController?.audioRecorder.startMonitoring()
+                        wakeWordManager?.startListening()
                     } catch {
                         logError("Failed to start wake word: \(error)")
                     }
                 } else {
-                    self.wakeWordManager?.stopListening()
-                    self.dictationController?.audioRecorder.stopMonitoring()
+                    wakeWordManager?.stopListening()
+                    dictationController?.audioRecorder.stopMonitoring()
                 }
             }
         }
@@ -383,9 +397,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let showPill = SinewBridge.shared.shouldShowFloatingPill
 
         // Always show pill for errors (Sinew module does not render detailed error text)
-        let isError = { if case .error = state { return true } else { return false } }()
+        let isError = if case .error = state { true } else { false }
 
-        if !showPill && !isError {
+        if !showPill, !isError {
             // Hide pill
             floatingPill?.show(
                 state: .idle,
@@ -460,7 +474,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Preferences...", action: #selector(showPreferences), keyEquivalent: ","))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit Hisohiso", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(
+            title: "Quit Hisohiso",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        ))
 
         statusItem?.menu = menu
         statusItem?.button?.performClick(nil)
@@ -476,7 +494,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func selectModel(_ sender: NSMenuItem) {
         guard let rawValue = sender.representedObject as? String,
               let model = TranscriptionModel(rawValue: rawValue),
-              let modelManager else {
+              let modelManager
+        else {
             return
         }
 
@@ -485,7 +504,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.post(name: .modelSelectionChanged, object: nil)
         logInfo("Model selected: \(model.rawValue)")
     }
-    
+
     #if DEBUG
     @objc private func testUI() {
         logInfo("testUI called - showing pill")
@@ -502,12 +521,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         logInfo("Showing onboarding")
         onboardingWindow = OnboardingWindow { [weak self] in
             guard let self else { return }
-            UserDefaults.standard.set(true, for: self.hasCompletedOnboardingKey)
-            self.onboardingWindow = nil
-            self.setupDictationController()
+            UserDefaults.standard.set(true, for: hasCompletedOnboardingKey)
+            onboardingWindow = nil
+            setupDictationController()
             logInfo("Onboarding completed")
         }
-        
+
         if let window = onboardingWindow {
             window.level = .floating
             window.makeKeyAndOrderFront(nil)
@@ -545,30 +564,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             switch dictationError {
             case .accessibilityPermissionDenied:
                 alert.informativeText = """
-                    Hisohiso needs Accessibility permission to capture the Globe key and insert text.
+                Hisohiso needs Accessibility permission to capture the Globe key and insert text.
 
-                    1. Click "Open System Settings"
-                    2. Find Hisohiso in the list and enable it
-                    3. If not in list, click + and add this app
-                    4. Restart Hisohiso
-                    """
+                1. Click "Open System Settings"
+                2. Find Hisohiso in the list and enable it
+                3. If not in list, click + and add this app
+                4. Restart Hisohiso
+                """
             case .microphonePermissionDenied:
                 alert.informativeText = """
-                    Hisohiso needs Microphone permission to record audio for transcription.
+                Hisohiso needs Microphone permission to record audio for transcription.
 
-                    Click "Open System Settings" and enable Microphone access.
-                    """
+                Click "Open System Settings" and enable Microphone access.
+                """
             default:
                 alert.informativeText = error.localizedDescription
             }
         } else {
             alert.informativeText = """
-                Hisohiso encountered an error during setup:
+            Hisohiso encountered an error during setup:
 
-                \(error.localizedDescription)
+            \(error.localizedDescription)
 
-                Try restarting the app. If the problem persists, check that you have enough disk space for model downloads.
-                """
+            Try restarting the app. If the problem persists, check that you have enough disk space for model downloads.
+            """
         }
 
         alert.alertStyle = .warning

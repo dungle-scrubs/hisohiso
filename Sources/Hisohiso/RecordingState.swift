@@ -9,10 +9,10 @@ enum RecordingState: Equatable {
 
     var displayText: String {
         switch self {
-        case .idle: return ""
-        case .recording: return "Recording..."
-        case .transcribing: return "Transcribing..."
-        case .error(let message): return message
+        case .idle: ""
+        case .recording: "Recording..."
+        case .transcribing: "Transcribing..."
+        case let .error(message): message
         }
     }
 }
@@ -49,9 +49,18 @@ final class RecordingStateManager: ObservableObject {
         onRetry?()
     }
 
-    var isIdle: Bool { state == .idle }
-    var isRecording: Bool { state == .recording }
-    var isTranscribing: Bool { state == .transcribing }
+    var isIdle: Bool {
+        state == .idle
+    }
+
+    var isRecording: Bool {
+        state == .recording
+    }
+
+    var isTranscribing: Bool {
+        state == .transcribing
+    }
+
     var hasError: Bool {
         if case .error = state { return true }
         return false

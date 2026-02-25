@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.hisohiso.app</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/hisohiso</string>
+    </array>
+
+    <!-- Auto-restart on crash or unexpected exit -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <!-- Wait 5 seconds before restarting to avoid spin loops -->
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <!-- Capture launchd-level stdout/stderr (separate from app logs) -->
+    <key>StandardOutPath</key>
+    <string>/tmp/hisohiso-launchd.out</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/hisohiso-launchd.err</string>
+
+    <!-- Run at load (login) -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Nice level: don't compete with foreground apps -->
+    <key>Nice</key>
+    <integer>5</integer>
+
+    <!-- Environment variables -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HISOHISO_MANAGED</key>
+        <string>launchd</string>
+    </dict>
+</dict>
+</plist>

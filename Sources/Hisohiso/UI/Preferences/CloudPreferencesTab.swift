@@ -15,19 +15,28 @@ final class CloudPreferencesTab: NSView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     private func setupViews() {
         var y = 260
 
-        let description = NSTextField(wrappingLabelWithString: "Cloud transcription is optional. Local models are always tried first. Enable fallback to use cloud when local fails.")
+        let description =
+            NSTextField(
+                wrappingLabelWithString: "Cloud transcription is optional. Local models are always tried first. Enable fallback to use cloud when local fails."
+            )
         description.frame = NSRect(x: 20, y: y - 20, width: 420, height: 40)
         description.font = .systemFont(ofSize: 12)
         description.textColor = .secondaryLabelColor
         addSubview(description)
         y -= 60
 
-        cloudFallbackToggle = NSButton(checkboxWithTitle: "Use cloud as fallback when local fails", target: self, action: #selector(cloudFallbackChanged))
+        cloudFallbackToggle = NSButton(
+            checkboxWithTitle: "Use cloud as fallback when local fails",
+            target: self,
+            action: #selector(cloudFallbackChanged)
+        )
         cloudFallbackToggle.frame = NSRect(x: 20, y: y, width: 400, height: 20)
         addSubview(cloudFallbackToggle)
         y -= 35
@@ -141,16 +150,20 @@ final class CloudPreferencesTab: NSView {
 
     @objc private func openAIKeyChanged() {
         let key = openAIKeyField.stringValue.trimmingCharacters(in: .whitespaces)
-        if key.isEmpty { _ = KeychainManager.shared.deleteAPIKey(.openAI) }
-        else { _ = KeychainManager.shared.setAPIKey(key, type: .openAI) }
+        if key.isEmpty { _ = KeychainManager.shared.deleteAPIKey(.openAI) } else { _ = KeychainManager.shared.setAPIKey(
+            key,
+            type: .openAI
+        ) }
         openAIKeyField.stringValue = ""
         updateKeyStatus()
     }
 
     @objc private func groqKeyChanged() {
         let key = groqKeyField.stringValue.trimmingCharacters(in: .whitespaces)
-        if key.isEmpty { _ = KeychainManager.shared.deleteAPIKey(.groq) }
-        else { _ = KeychainManager.shared.setAPIKey(key, type: .groq) }
+        if key.isEmpty { _ = KeychainManager.shared.deleteAPIKey(.groq) } else { _ = KeychainManager.shared.setAPIKey(
+            key,
+            type: .groq
+        ) }
         groqKeyField.stringValue = ""
         updateKeyStatus()
     }

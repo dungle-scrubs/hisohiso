@@ -48,7 +48,7 @@ final class ToastWindow {
             toast.setFrame(NSRect(x: x, y: 120, width: width, height: height), display: true)
         }
 
-        self.window = toast
+        window = toast
         toast.orderFrontRegardless()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in

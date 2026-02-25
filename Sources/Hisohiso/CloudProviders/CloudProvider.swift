@@ -30,19 +30,19 @@ enum CloudTranscriptionError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notConfigured:
-            return "Cloud provider not configured"
+            "Cloud provider not configured"
         case .invalidAPIKey:
-            return "Invalid API key"
+            "Invalid API key"
         case .rateLimited:
-            return "Rate limited - please try again later"
-        case .networkError(let error):
-            return "Network error: \(error.localizedDescription)"
+            "Rate limited - please try again later"
+        case let .networkError(error):
+            "Network error: \(error.localizedDescription)"
         case .invalidResponse:
-            return "Invalid response from server"
-        case .apiError(let message):
-            return "API error: \(message)"
+            "Invalid response from server"
+        case let .apiError(message):
+            "API error: \(message)"
         case .audioEncodingFailed:
-            return "Failed to encode audio"
+            "Failed to encode audio"
         }
     }
 }
@@ -50,19 +50,19 @@ enum CloudTranscriptionError: Error, LocalizedError {
 /// Available cloud providers
 enum CloudProviderType: String, CaseIterable {
     case openAI = "openai"
-    case groq = "groq"
+    case groq
 
     var displayName: String {
         switch self {
-        case .openAI: return "OpenAI Whisper"
-        case .groq: return "Groq Whisper"
+        case .openAI: "OpenAI Whisper"
+        case .groq: "Groq Whisper"
         }
     }
 
     var keychainType: KeychainManager.APIKeyType {
         switch self {
-        case .openAI: return .openAI
-        case .groq: return .groq
+        case .openAI: .openAI
+        case .groq: .groq
         }
     }
 }
@@ -113,7 +113,7 @@ class BaseCloudProvider: CloudProvider {
         body.appendFormField("model", value: model, boundary: boundary)
         body.appendFormFile("file", filename: "audio.wav", contentType: "audio/wav", data: wavData, boundary: boundary)
         body.appendFormField("response_format", value: "json", boundary: boundary)
-        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        body.append(Data("--\(boundary)--\r\n".utf8))
         request.httpBody = body
 
         logInfo("\(displayName): sending \(wavData.count) bytes of audio")
@@ -155,16 +155,16 @@ class BaseCloudProvider: CloudProvider {
 
 private extension Data {
     mutating func appendFormField(_ name: String, value: String, boundary: String) {
-        append("--\(boundary)\r\n".data(using: .utf8)!)
-        append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
-        append("\(value)\r\n".data(using: .utf8)!)
+        append(Data("--\(boundary)\r\n".utf8))
+        append(Data("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".utf8))
+        append(Data("\(value)\r\n".utf8))
     }
 
     mutating func appendFormFile(_ name: String, filename: String, contentType: String, data: Data, boundary: String) {
-        append("--\(boundary)\r\n".data(using: .utf8)!)
-        append("Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
-        append("Content-Type: \(contentType)\r\n\r\n".data(using: .utf8)!)
+        append(Data("--\(boundary)\r\n".utf8))
+        append(Data("Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\r\n".utf8))
+        append(Data("Content-Type: \(contentType)\r\n\r\n".utf8))
         append(data)
-        append("\r\n".data(using: .utf8)!)
+        append(Data("\r\n".utf8))
     }
 }

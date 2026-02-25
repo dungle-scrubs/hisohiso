@@ -273,7 +273,7 @@ final class HistoryStore {
         var queryIndex = query.startIndex
 
         for char in text {
-            if queryIndex < query.endIndex && char == query[queryIndex] {
+            if queryIndex < query.endIndex, char == query[queryIndex] {
                 queryIndex = query.index(after: queryIndex)
             }
         }

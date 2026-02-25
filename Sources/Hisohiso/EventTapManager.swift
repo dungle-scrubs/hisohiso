@@ -180,10 +180,8 @@ final class EventTapManager: @unchecked Sendable {
             registrations.filter { $0.eventTypes.contains(type) }
         }
 
-        for registration in handlers {
-            if registration.handler(event, type) {
-                return true // consumed
-            }
+        for registration in handlers where registration.handler(event, type) {
+            return true // consumed
         }
         return false
     }

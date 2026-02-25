@@ -1,5 +1,5 @@
-/// View components used by `HistoryPaletteWindow` — row views, cell views,
-/// and cursor-management helpers for the history palette table.
+// View components used by `HistoryPaletteWindow` — row views, cell views,
+// and cursor-management helpers for the history palette table.
 
 import AppKit
 import Carbon.HIToolbox
@@ -105,7 +105,7 @@ final class NonSelectableTextField: NSTextField {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         // Pass through all mouse events to parent
-        return nil
+        nil
     }
 }
 
@@ -122,7 +122,7 @@ final class HistoryRecordCellView: NSTableCellView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         // Pass through to row view for cursor handling
-        return nil
+        nil
     }
 
     override init(frame frameRect: NSRect) {

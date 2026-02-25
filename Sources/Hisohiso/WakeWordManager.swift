@@ -1,5 +1,5 @@
-import AVFoundation
 import Accelerate
+import AVFoundation
 import Foundation
 import WhisperKit
 
@@ -21,7 +21,8 @@ final class WakeWordManager: ObservableObject {
     @Published private(set) var isListening = false {
         didSet { listeningFlag = isListening }
     }
-    nonisolated(unsafe) private var listeningFlag = false
+
+    private nonisolated(unsafe) var listeningFlag = false
 
     /// The configured wake phrase (e.g., "hey kevin", "computer").
     /// Empty or whitespace-only values are rejected to prevent false activations.
@@ -43,36 +44,36 @@ final class WakeWordManager: ObservableObject {
     // MARK: - Private Properties
 
     /// Audio buffer and VAD state — accessed from the audio thread, protected by `bufferLock`.
-    nonisolated(unsafe) private var _audioBuffer: [Float] = []
+    private nonisolated(unsafe) var _audioBuffer: [Float] = []
     private let bufferLock = NSLock()
 
     /// VAD state — protected by `bufferLock`.
-    nonisolated(unsafe) private var _isSpeaking = false
-    nonisolated(unsafe) private var _silenceFrames = 0
+    private nonisolated(unsafe) var _isSpeaking = false
+    private nonisolated(unsafe) var _silenceFrames = 0
     private let silenceThreshold = AppConstants.wakeWordSilenceFrames
     private let speechThreshold: Float = AppConstants.wakeWordSpeechThreshold
 
     /// Whisper tiny for wake phrase detection
     /// Marked `nonisolated(unsafe)` because `WhisperKit.transcribe` is nonisolated but
     /// internally thread-safe. All writes happen on MainActor (init, deinit).
-    nonisolated(unsafe) private var whisperKit: WhisperKit?
+    private nonisolated(unsafe) var whisperKit: WhisperKit?
     private var isProcessing = false
 
     /// Pre-buffer to capture audio before speech is detected — protected by `bufferLock`.
-    nonisolated(unsafe) private var _preBuffer: [[Float]] = []
+    private nonisolated(unsafe) var _preBuffer: [[Float]] = []
     private let preBufferFrames = AppConstants.wakeWordPreBufferFrames
 
     /// Maximum buffer size (~3 seconds at 16kHz)
     private let maxBufferSamples = AppConstants.maxWakeWordBufferSamples
 
     /// Frame counter for debug logging — protected by `bufferLock`.
-    nonisolated(unsafe) private var _frameCounter = 0
+    private nonisolated(unsafe) var _frameCounter = 0
 
     // MARK: - Initialization
 
     init() {
         let enabled = UserDefaults.standard.bool(for: .wakeWordEnabled)
-        self.isEnabled = enabled
+        isEnabled = enabled
     }
 
     // MARK: - Public Methods
@@ -136,11 +137,10 @@ final class WakeWordManager: ObservableObject {
         guard listeningFlag else { return }
 
         // Resample to 16kHz if needed
-        let resampled: [Float]
-        if abs(sampleRate - AppConstants.targetSampleRate) > 1 {
-            resampled = AudioDSP.resample(samples, from: sampleRate, to: AppConstants.targetSampleRate)
+        let resampled: [Float] = if abs(sampleRate - AppConstants.targetSampleRate) > 1 {
+            AudioDSP.resample(samples, from: sampleRate, to: AppConstants.targetSampleRate)
         } else {
-            resampled = samples
+            samples
         }
 
         // Calculate RMS for VAD
@@ -214,7 +214,9 @@ final class WakeWordManager: ObservableObject {
             return
         }
 
-        logDebug("WakeWordManager: Checking \(samples.count) samples (\(String(format: "%.1f", Double(samples.count) / 16000.0))s)")
+        logDebug(
+            "WakeWordManager: Checking \(samples.count) samples (\(String(format: "%.1f", Double(samples.count) / 16000.0))s)"
+        )
 
         guard samples.count >= AppConstants.minWakeWordSamples else {
             logDebug("WakeWordManager: Too few samples (\(samples.count) < \(AppConstants.minWakeWordSamples))")
@@ -224,7 +226,7 @@ final class WakeWordManager: ObservableObject {
         isProcessing = true
         defer { isProcessing = false }
 
-        guard let whisperKit = whisperKit else {
+        guard let whisperKit else {
             logError("WakeWordManager: WhisperKit not initialized")
             return
         }

@@ -1,5 +1,5 @@
-import XCTest
 @testable import Hisohiso
+import XCTest
 
 @MainActor
 final class HistoryStoreTests: XCTestCase {
@@ -17,7 +17,7 @@ final class HistoryStoreTests: XCTestCase {
 
     // MARK: - Basic CRUD
 
-    func testSaveAndRetrieve() async throws {
+    func testSaveAndRetrieve() {
         let record = store.save(text: "Hello world", duration: 2.5, modelName: "test-model")
         XCTAssertNotNil(record)
         XCTAssertEqual(record?.text, "Hello world")
@@ -44,8 +44,8 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertEqual(recent[2].text, "First")
     }
 
-    func testRecentRespectsLimit() async throws {
-        for i in 1 ... 10 {
+    func testRecentRespectsLimit() {
+        for i in 1...10 {
             store.save(text: "Item \(i)", duration: 1.0, modelName: "test")
         }
 
@@ -53,16 +53,16 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertEqual(recent.count, 5)
     }
 
-    func testDeleteRecord() async throws {
+    func testDeleteRecord() throws {
         let record = store.save(text: "To delete", duration: 1.0, modelName: "test")
         XCTAssertNotNil(record)
         XCTAssertEqual(store.count, 1)
 
-        store.delete(record!)
+        try store.delete(XCTUnwrap(record))
         XCTAssertEqual(store.count, 0)
     }
 
-    func testDeleteAll() async throws {
+    func testDeleteAll() {
         store.save(text: "One", duration: 1.0, modelName: "test")
         store.save(text: "Two", duration: 1.0, modelName: "test")
         store.save(text: "Three", duration: 1.0, modelName: "test")
@@ -74,7 +74,7 @@ final class HistoryStoreTests: XCTestCase {
 
     // MARK: - Search
 
-    func testSearchExactMatch() async throws {
+    func testSearchExactMatch() {
         store.save(text: "The quick brown fox", duration: 1.0, modelName: "test")
         store.save(text: "Lazy dog", duration: 1.0, modelName: "test")
 
@@ -83,7 +83,7 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertEqual(results.first?.text, "The quick brown fox")
     }
 
-    func testSearchCaseInsensitive() async throws {
+    func testSearchCaseInsensitive() {
         store.save(text: "Hello World", duration: 1.0, modelName: "test")
 
         let results = store.search(query: "hello")
@@ -93,7 +93,7 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertEqual(results2.count, 1)
     }
 
-    func testSearchMultipleWords() async throws {
+    func testSearchMultipleWords() {
         store.save(text: "Meeting with John about project", duration: 1.0, modelName: "test")
         store.save(text: "Call John tomorrow", duration: 1.0, modelName: "test")
         store.save(text: "Project deadline Friday", duration: 1.0, modelName: "test")
@@ -104,7 +104,7 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertTrue(results[0].text.contains("John"))
     }
 
-    func testSearchEmptyQueryReturnsRecent() async throws {
+    func testSearchEmptyQueryReturnsRecent() {
         store.save(text: "Item one", duration: 1.0, modelName: "test")
         store.save(text: "Item two", duration: 1.0, modelName: "test")
 
@@ -115,7 +115,7 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertEqual(results2.count, 2)
     }
 
-    func testSearchNoResults() async throws {
+    func testSearchNoResults() {
         store.save(text: "Hello world", duration: 1.0, modelName: "test")
 
         let results = store.search(query: "xyz123")
@@ -124,20 +124,20 @@ final class HistoryStoreTests: XCTestCase {
 
     // MARK: - Edge Cases
 
-    func testSaveEmptyText() async throws {
+    func testSaveEmptyText() {
         let record = store.save(text: "", duration: 1.0, modelName: "test")
         XCTAssertNotNil(record)
         XCTAssertEqual(record?.text, "")
     }
 
-    func testSaveVeryLongText() async throws {
+    func testSaveVeryLongText() {
         let longText = String(repeating: "a", count: 10000)
         let record = store.save(text: longText, duration: 1.0, modelName: "test")
         XCTAssertNotNil(record)
         XCTAssertEqual(record?.text.count, 10000)
     }
 
-    func testCount() async throws {
+    func testCount() {
         XCTAssertEqual(store.count, 0)
 
         store.save(text: "One", duration: 1.0, modelName: "test")

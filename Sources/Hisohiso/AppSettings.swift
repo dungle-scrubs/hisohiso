@@ -13,10 +13,10 @@ enum SettingsKey: String {
     case audioFeedbackEnabled
     case useAudioKit
 
-    // Model
+    /// Model
     case selectedModel
 
-    // Hotkey
+    /// Hotkey
     case alternativeHotkey
 
     // Wake word
@@ -35,10 +35,10 @@ enum SettingsKey: String {
     case cloudFallbackEnabled
     case cloudFallbackProvider
 
-    // Text formatting
+    /// Text formatting
     case fillerWords
 
-    // Onboarding
+    /// Onboarding
     case hasCompletedOnboarding
 }
 
@@ -141,10 +141,10 @@ enum AppConstants {
     // MARK: - Key Codes
 
     /// Virtual key code for Escape.
-    static let escapeKeyCode: UInt16 = UInt16(kVK_Escape)
+    static let escapeKeyCode: UInt16 = .init(kVK_Escape)
 
     /// Virtual key code for V (used in Cmd+V paste simulation).
-    static let vKeyCode: UInt16 = UInt16(kVK_ANSI_V)
+    static let vKeyCode: UInt16 = .init(kVK_ANSI_V)
 
     // MARK: - Wake Word
 

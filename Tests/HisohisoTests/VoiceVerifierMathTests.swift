@@ -1,6 +1,6 @@
 import Accelerate
-import XCTest
 @testable import Hisohiso
+import XCTest
 
 /// Tests for VoiceVerifier's vector math operations.
 ///

@@ -1,5 +1,5 @@
-import XCTest
 @testable import Hisohiso
+import XCTest
 
 final class AppSettingsTests: XCTestCase {
     /// Unique suite name to avoid polluting real UserDefaults.

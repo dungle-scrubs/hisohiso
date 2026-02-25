@@ -19,12 +19,18 @@ final class VoicePreferencesTab: NSView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     private func setupViews() {
         var y = 260
 
-        verificationToggle = NSButton(checkboxWithTitle: "Enable voice verification", target: self, action: #selector(verificationChanged))
+        verificationToggle = NSButton(
+            checkboxWithTitle: "Enable voice verification",
+            target: self,
+            action: #selector(verificationChanged)
+        )
         verificationToggle.frame = NSRect(x: 20, y: y, width: 300, height: 20)
         addSubview(verificationToggle)
 
@@ -39,7 +45,13 @@ final class VoicePreferencesTab: NSView {
         sensitivityLabel.frame = NSRect(x: 20, y: y, width: 80, height: 20)
         addSubview(sensitivityLabel)
 
-        thresholdSlider = NSSlider(value: 50, minValue: 0, maxValue: 100, target: self, action: #selector(thresholdChanged))
+        thresholdSlider = NSSlider(
+            value: 50,
+            minValue: 0,
+            maxValue: 100,
+            target: self,
+            action: #selector(thresholdChanged)
+        )
         thresholdSlider.frame = NSRect(x: 110, y: y, width: 200, height: 20)
         addSubview(thresholdSlider)
 
@@ -133,8 +145,7 @@ final class VoicePreferencesTab: NSView {
     }
 
     @objc private func startEnrollment() {
-        if isRecordingEnrollment { stopEnrollmentRecording() }
-        else { beginEnrollment() }
+        if isRecordingEnrollment { stopEnrollmentRecording() } else { beginEnrollment() }
     }
 
     private func beginEnrollment() {
@@ -153,14 +164,13 @@ final class VoicePreferencesTab: NSView {
         do {
             try recorder.startRecording()
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-                guard let self, self.isRecordingEnrollment else { return }
+                guard let self, isRecordingEnrollment else { return }
                 let samples = recorder.stopRecording()
                 if samples.count >= VoiceVerifier.minSamplesForVerification {
-                    self.enrollmentSamples.append(samples)
-                    self.progressLabel.stringValue = "🎤 Keep speaking... (\(self.enrollmentSamples.count) samples)"
+                    enrollmentSamples.append(samples)
+                    progressLabel.stringValue = "🎤 Keep speaking... (\(enrollmentSamples.count) samples)"
                 }
-                if self.enrollmentSamples.count < 3 { self.collectEnrollmentSample() }
-                else { self.stopEnrollmentRecording() }
+                if enrollmentSamples.count < 3 { collectEnrollmentSample() } else { stopEnrollmentRecording() }
             }
         } catch {
             logError("Failed to start enrollment recording: \(error)")

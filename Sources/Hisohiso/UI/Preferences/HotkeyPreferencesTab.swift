@@ -13,12 +13,17 @@ final class HotkeyPreferencesTab: NSView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     private func setupViews() {
         var y = 260
 
-        let description = NSTextField(wrappingLabelWithString: "The Globe key (🌐) is always active. You can also set an alternative hotkey below.")
+        let description =
+            NSTextField(
+                wrappingLabelWithString: "The Globe key (🌐) is always active. You can also set an alternative hotkey below."
+            )
         description.frame = NSRect(x: 20, y: y - 20, width: 420, height: 40)
         description.font = .systemFont(ofSize: 12)
         description.textColor = .secondaryLabelColor
@@ -38,7 +43,10 @@ final class HotkeyPreferencesTab: NSView {
         addSubview(hotkeyRecorder)
         y -= 50
 
-        let hint = NSTextField(wrappingLabelWithString: "Hold the hotkey to record, release to transcribe. Click the field above and press your desired key combination, or press Escape to clear.")
+        let hint =
+            NSTextField(
+                wrappingLabelWithString: "Hold the hotkey to record, release to transcribe. Click the field above and press your desired key combination, or press Escape to clear."
+            )
         hint.frame = NSRect(x: 20, y: y - 40, width: 420, height: 50)
         hint.font = .systemFont(ofSize: 11)
         hint.textColor = .tertiaryLabelColor

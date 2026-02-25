@@ -1,5 +1,5 @@
-import XCTest
 @testable import Hisohiso
+import XCTest
 
 final class AudioDSPTests: XCTestCase {
     // MARK: - Resample
@@ -91,9 +91,11 @@ final class AudioDSPTests: XCTestCase {
         let input: [Float] = [-0.3, -0.1, 0.0, 0.1, 0.3]
         let output = AudioDSP.normalize(input)
         for (i, o) in zip(input, output) {
-            if i > 0 { XCTAssertGreaterThan(o, 0) }
-            else if i < 0 { XCTAssertLessThan(o, 0) }
-            else { XCTAssertEqual(o, 0, accuracy: 0.0001) }
+            if i > 0 { XCTAssertGreaterThan(o, 0) } else if i < 0 { XCTAssertLessThan(o, 0) } else { XCTAssertEqual(
+                o,
+                0,
+                accuracy: 0.0001
+            ) }
         }
     }
 
