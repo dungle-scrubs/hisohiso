@@ -60,7 +60,7 @@ enum CrashReporter {
 
     /// Signals we intercept.
     private static let signals: [Int32] = [
-        SIGABRT, SIGBUS, SIGFPE, SIGILL, SIGSEGV, SIGTRAP, SIGTERM,
+        SIGABRT, SIGBUS, SIGFPE, SIGILL, SIGSEGV, SIGTRAP, SIGTERM
     ]
 
     // MARK: - Install
@@ -302,7 +302,7 @@ enum CrashReporter {
     /// Build a system info string for the crash archive.
     private static func buildSystemInfo() -> String {
         let process = ProcessInfo.processInfo
-        let fm = FileManager.default
+        let fileManager = FileManager.default
 
         var lines: [String] = []
         lines.append("Hisohiso Crash Report")
@@ -320,9 +320,8 @@ enum CrashReporter {
         }
 
         // Disk space
-        if let attrs = try? fm.attributesOfFileSystem(forPath: NSHomeDirectory()),
-           let freeBytes = attrs[.systemFreeSize] as? Int64
-        {
+        if let attrs = try? fileManager.attributesOfFileSystem(forPath: NSHomeDirectory()),
+           let freeBytes = attrs[.systemFreeSize] as? Int64 {
             lines.append("Free Disk: \(freeBytes / (1024 * 1024 * 1024)) GB")
         }
 
@@ -334,16 +333,16 @@ enum CrashReporter {
     private static func copyRecentLogs(to archiveDir: URL) {
         let logsDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/Hisohiso")
-        let fm = FileManager.default
+        let fileManager = FileManager.default
 
-        guard let files = try? fm.contentsOfDirectory(at: logsDir, includingPropertiesForKeys: [.creationDateKey])
+        guard let files = try? fileManager.contentsOfDirectory(at: logsDir, includingPropertiesForKeys: [.creationDateKey])
             .filter({ $0.lastPathComponent.hasPrefix("hisohiso-") && $0.pathExtension == "log" })
             .sorted(by: { $0.lastPathComponent > $1.lastPathComponent })
         else { return }
 
         for file in files.prefix(2) {
             let dest = archiveDir.appendingPathComponent(file.lastPathComponent)
-            try? fm.copyItem(at: file, to: dest)
+            try? fileManager.copyItem(at: file, to: dest)
         }
     }
 
