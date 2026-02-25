@@ -91,7 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Handle reopen (e.g., clicking dock icon or `open -a Hisohiso`)
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        return true
+        true
     }
 
     /// Handle Apple Events (for `open -a Hisohiso --args --history`)
@@ -271,8 +271,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             Task { @MainActor [weak self] in
                                 guard let self else { return }
                                 do {
-                                    try await self.dictationController?.reloadSelectedModel()
-                                    self.hasPendingModelReload = false
+                                    try await dictationController?.reloadSelectedModel()
+                                    hasPendingModelReload = false
                                     logInfo("Applied pending model change")
                                 } catch {
                                     logError("Failed to apply pending model change: \(error)")
@@ -310,18 +310,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupWakeWord() async {
         logInfo("Setting up wake word manager...")
         wakeWordManager = WakeWordManager()
-        
+
         // Connect AudioRecorder's monitoring to WakeWordManager
         dictationController?.audioRecorder.onMonitoringSamples = { [weak self] samples, sampleRate in
             self?.wakeWordManager?.processAudioSamples(samples, sampleRate: sampleRate)
         }
-        
+
         // When wake word detected, start recording
         wakeWordManager?.onWakeWordDetected = { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
                 guard self.dictationController?.stateManager.isIdle == true else { return }
-                
+
                 logInfo("Wake word triggered recording")
                 // Pause monitoring and wake word listening while recording
                 self.dictationController?.audioRecorder.pauseMonitoring()
@@ -330,7 +330,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 await self.dictationController?.startRecording(fromWakeWord: true)
             }
         }
-        
+
         // Initialize Whisper tiny for wake word
         if wakeWordManager?.isEnabled == true {
             do {
@@ -339,7 +339,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 logError("Failed to initialize wake word: \(error)")
             }
         }
-        
+
         // Start monitoring if enabled
         logInfo("Wake word enabled: \(wakeWordManager?.isEnabled ?? false)")
         if wakeWordManager?.isEnabled == true {
@@ -351,7 +351,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 logError("Failed to start wake word monitoring: \(error)")
             }
         }
-        
+
         // Listen for settings changes
         if let observer = wakeWordSettingsObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -394,9 +394,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let showPill = SinewBridge.shared.shouldShowFloatingPill
 
         // Always show pill for errors (Sinew module does not render detailed error text)
-        let isError = { if case .error = state { return true } else { return false } }()
+        let isError = if case .error = state { true } else { false }
 
-        if !showPill && !isError {
+        if !showPill, !isError {
             // Hide pill
             floatingPill?.show(
                 state: .idle,
@@ -471,7 +471,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Preferences...", action: #selector(showPreferences), keyEquivalent: ","))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit Hisohiso", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(
+            title: "Quit Hisohiso",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        ))
 
         statusItem?.menu = menu
         statusItem?.button?.performClick(nil)
@@ -487,7 +491,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func selectModel(_ sender: NSMenuItem) {
         guard let rawValue = sender.representedObject as? String,
               let model = TranscriptionModel(rawValue: rawValue),
-              let modelManager else {
+              let modelManager
+        else {
             return
         }
 
@@ -496,7 +501,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.post(name: .modelSelectionChanged, object: nil)
         logInfo("Model selected: \(model.rawValue)")
     }
-    
+
     #if DEBUG
     @objc private func testUI() {
         logInfo("testUI called - showing pill")
@@ -513,12 +518,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         logInfo("Showing onboarding")
         onboardingWindow = OnboardingWindow { [weak self] in
             guard let self else { return }
-            UserDefaults.standard.set(true, for: self.hasCompletedOnboardingKey)
-            self.onboardingWindow = nil
-            self.setupDictationController()
+            UserDefaults.standard.set(true, for: hasCompletedOnboardingKey)
+            onboardingWindow = nil
+            setupDictationController()
             logInfo("Onboarding completed")
         }
-        
+
         if let window = onboardingWindow {
             window.level = .floating
             window.makeKeyAndOrderFront(nil)
@@ -556,30 +561,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             switch dictationError {
             case .accessibilityPermissionDenied:
                 alert.informativeText = """
-                    Hisohiso needs Accessibility permission to capture the Globe key and insert text.
+                Hisohiso needs Accessibility permission to capture the Globe key and insert text.
 
-                    1. Click "Open System Settings"
-                    2. Find Hisohiso in the list and enable it
-                    3. If not in list, click + and add this app
-                    4. Restart Hisohiso
-                    """
+                1. Click "Open System Settings"
+                2. Find Hisohiso in the list and enable it
+                3. If not in list, click + and add this app
+                4. Restart Hisohiso
+                """
             case .microphonePermissionDenied:
                 alert.informativeText = """
-                    Hisohiso needs Microphone permission to record audio for transcription.
+                Hisohiso needs Microphone permission to record audio for transcription.
 
-                    Click "Open System Settings" and enable Microphone access.
-                    """
+                Click "Open System Settings" and enable Microphone access.
+                """
             default:
                 alert.informativeText = error.localizedDescription
             }
         } else {
             alert.informativeText = """
-                Hisohiso encountered an error during setup:
+            Hisohiso encountered an error during setup:
 
-                \(error.localizedDescription)
+            \(error.localizedDescription)
 
-                Try restarting the app. If the problem persists, check that you have enough disk space for model downloads.
-                """
+            Try restarting the app. If the problem persists, check that you have enough disk space for model downloads.
+            """
         }
 
         alert.alertStyle = .warning

@@ -1,5 +1,5 @@
-import XCTest
 @testable import Hisohiso
+import XCTest
 
 final class AudioEncoderTests: XCTestCase {
     // MARK: - WAV Header Validation
@@ -12,19 +12,19 @@ final class AudioEncoderTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(data.count, 44)
 
         // Check RIFF header
-        let riff = String(data: data[0 ..< 4], encoding: .ascii)
+        let riff = String(data: data[0..<4], encoding: .ascii)
         XCTAssertEqual(riff, "RIFF")
 
         // Check WAVE format
-        let wave = String(data: data[8 ..< 12], encoding: .ascii)
+        let wave = String(data: data[8..<12], encoding: .ascii)
         XCTAssertEqual(wave, "WAVE")
 
         // Check fmt subchunk
-        let fmt = String(data: data[12 ..< 16], encoding: .ascii)
+        let fmt = String(data: data[12..<16], encoding: .ascii)
         XCTAssertEqual(fmt, "fmt ")
 
         // Check data subchunk marker
-        let dataMarker = String(data: data[36 ..< 40], encoding: .ascii)
+        let dataMarker = String(data: data[36..<40], encoding: .ascii)
         XCTAssertEqual(dataMarker, "data")
     }
 
@@ -79,7 +79,7 @@ final class AudioEncoderTests: XCTestCase {
         let data = try XCTUnwrap(AudioEncoder.encodeToWAV(samples: samples, sampleRate: 16000))
 
         // Read back the PCM samples (offset 44+)
-        let pcmData = data.subdata(in: 44 ..< data.count)
+        let pcmData = data.subdata(in: 44..<data.count)
         let pcmSamples = pcmData.withUnsafeBytes { ptr in
             Array(ptr.bindMemory(to: Int16.self))
         }
@@ -93,7 +93,7 @@ final class AudioEncoderTests: XCTestCase {
         let samples = [Float](repeating: 0.0, count: 10)
         let data = try XCTUnwrap(AudioEncoder.encodeToWAV(samples: samples, sampleRate: 16000))
 
-        let pcmData = data.subdata(in: 44 ..< data.count)
+        let pcmData = data.subdata(in: 44..<data.count)
         let pcmSamples = pcmData.withUnsafeBytes { ptr in
             Array(ptr.bindMemory(to: Int16.self))
         }

@@ -109,12 +109,12 @@ final class DictationController: ObservableObject {
 
     private func setupCallbacks() {
         logInfo("Setting up callbacks...")
-        
+
         // Tap: toggle recording on/off
         globeMonitor.onGlobeTap = { [weak self] in
-            guard let self else { 
+            guard let self else {
                 logWarning("onGlobeTap: self is nil")
-                return 
+                return
             }
             logInfo("Globe tap received, calling toggleRecording")
             Task { await self.toggleRecording() }
@@ -128,7 +128,7 @@ final class DictationController: ObservableObject {
             }
             logInfo("Globe hold start received")
             // If already recording (from a tap), stop immediately
-            if self.stateManager.isRecording {
+            if stateManager.isRecording {
                 logInfo("Hold started while recording - stopping immediately")
                 Task { await self.stopRecordingAndTranscribe() }
                 return
@@ -143,7 +143,7 @@ final class DictationController: ObservableObject {
                 return
             }
             // Only stop if still recording (might have been stopped by hold-start)
-            guard self.stateManager.isRecording else { return }
+            guard stateManager.isRecording else { return }
             Task { await self.stopRecordingAndTranscribe() }
         }
 
@@ -193,7 +193,7 @@ final class DictationController: ObservableObject {
     /// - Parameter fromWakeWord: If `true`, recording auto-stops after detecting silence.
     func startRecording(fromWakeWord: Bool = false) async {
         logInfo("startRecording called (fromWakeWord: \(fromWakeWord), currentState: \(stateManager.state))")
-        
+
         guard stateManager.isIdle else {
             logWarning("Cannot start recording: not in idle state (state: \(stateManager.state))")
             return
@@ -211,7 +211,9 @@ final class DictationController: ObservableObject {
 
         do {
             try activeRecorder.startRecording()
-            logInfo("Using \(useAudioKit ? "AudioKit" : "AVAudioEngine") recorder\(fromWakeWord ? " (wake word triggered, auto-stop enabled)" : "")")
+            logInfo(
+                "Using \(useAudioKit ? "AudioKit" : "AVAudioEngine") recorder\(fromWakeWord ? " (wake word triggered, auto-stop enabled)" : "")"
+            )
 
             // Notify Sinew
             sinewBridge.sendState(.recording)
@@ -265,11 +267,12 @@ final class DictationController: ObservableObject {
 
     private func startAudioLevelUpdates() {
         audioLevelTimer?.invalidate()
-        audioLevelTimer = Timer.scheduledTimer(withTimeInterval: AppConstants.audioLevelUpdateInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.handleAudioLevelTick()
+        audioLevelTimer = Timer
+            .scheduledTimer(withTimeInterval: AppConstants.audioLevelUpdateInterval, repeats: true) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.handleAudioLevelTick()
+                }
             }
-        }
     }
 
     @MainActor
@@ -285,29 +288,31 @@ final class DictationController: ObservableObject {
             checkSilenceForAutoStop(samples: samples)
         }
     }
-    
+
     /// Check for silence and auto-stop if wake word triggered
     private func checkSilenceForAutoStop(samples: [Float]) {
         guard !samples.isEmpty else { return }
-        
+
         // Increment grace period counter
         gracePeriodFrames += 1
-        
+
         // Don't check for silence during grace period (first 3 seconds)
         guard gracePeriodFrames >= gracePeriodThreshold else {
             return
         }
-        
+
         // Calculate RMS
         var rms: Float = 0
         samples.withUnsafeBufferPointer { buffer in
             vDSP_rmsqv(buffer.baseAddress!, 1, &rms, vDSP_Length(samples.count))
         }
-        
+
         if rms < silenceRMSThreshold {
             silenceFrameCount += 1
             if silenceFrameCount >= silenceThresholdForStop {
-                logInfo("Wake word recording: auto-stopping after \(silenceFrameCount) frames of silence (grace period: \(gracePeriodFrames) frames)")
+                logInfo(
+                    "Wake word recording: auto-stopping after \(silenceFrameCount) frames of silence (grace period: \(gracePeriodFrames) frames)"
+                )
                 Task { @MainActor in
                     await self.stopRecordingAndTranscribe()
                 }
@@ -342,11 +347,10 @@ final class DictationController: ObservableObject {
         sinewBridge.sendState(.transcribing)
 
         // Calculate recording duration
-        let duration: TimeInterval
-        if let startTime = recordingStartTime {
-            duration = Date().timeIntervalSince(startTime)
+        let duration: TimeInterval = if let startTime = recordingStartTime {
+            Date().timeIntervalSince(startTime)
         } else {
-            duration = Double(audioSamples.count) / AppConstants.targetSampleRate
+            Double(audioSamples.count) / AppConstants.targetSampleRate
         }
         recordingStartTime = nil
 
@@ -359,7 +363,9 @@ final class DictationController: ObservableObject {
 
         // Minimum audio length check — Parakeet needs at least 1 second
         guard audioSamples.count >= AppConstants.minTranscriptionSamples else {
-            logInfo("Audio too short (\(audioSamples.count) samples, need \(AppConstants.minTranscriptionSamples)), ignoring")
+            logInfo(
+                "Audio too short (\(audioSamples.count) samples, need \(AppConstants.minTranscriptionSamples)), ignoring"
+            )
             // Just go back to idle silently - no error, just not enough audio
             stateManager.setIdle()
             sinewBridge.sendState(.idle)
@@ -378,7 +384,9 @@ final class DictationController: ObservableObject {
             do {
                 let verificationResult = try await VoiceVerifier.shared.verify(audioSamples: audioSamples)
                 if !verificationResult.isMatch {
-                    logInfo("Voice verification failed (similarity: \(String(format: "%.2f", verificationResult.similarity)))")
+                    logInfo(
+                        "Voice verification failed (similarity: \(String(format: "%.2f", verificationResult.similarity)))"
+                    )
                     stateManager.setIdle()
                     sinewBridge.sendState(.idle)
                     return
@@ -481,15 +489,15 @@ enum DictationError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .microphonePermissionDenied:
-            return "Microphone permission denied. Please grant access in System Settings → Privacy & Security → Microphone."
+            "Microphone permission denied. Please grant access in System Settings → Privacy & Security → Microphone."
         case .accessibilityPermissionDenied:
-            return "Accessibility permission denied. Please grant access in System Settings → Privacy & Security → Accessibility."
+            "Accessibility permission denied. Please grant access in System Settings → Privacy & Security → Accessibility."
         case .eventTapFailed:
-            return "Failed to create event tap for Globe key. Please check Accessibility permissions."
+            "Failed to create event tap for Globe key. Please check Accessibility permissions."
         case .notInitialized:
-            return "Dictation controller not initialized"
+            "Dictation controller not initialized"
         case .cannotChangeModelWhileBusy:
-            return "Stop recording/transcribing before changing transcription model."
+            "Stop recording/transcribing before changing transcription model."
         }
     }
 }

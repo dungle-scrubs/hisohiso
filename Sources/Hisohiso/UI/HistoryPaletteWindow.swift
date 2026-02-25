@@ -64,9 +64,14 @@ final class HistoryPaletteWindow: NSPanel {
         becomesKeyOnlyIfNeeded = false
     }
 
-    // Allow panel to become key window
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
+    /// Allow panel to become key window
+    override var canBecomeKey: Bool {
+        true
+    }
+
+    override var canBecomeMain: Bool {
+        true
+    }
 
     private func setupViews() {
         // Background view with solid dark background + rounded corners
@@ -90,11 +95,11 @@ final class HistoryPaletteWindow: NSPanel {
         searchField.delegate = self
         searchField.target = self
         searchField.action = #selector(searchFieldAction)
-        
+
         // Style placeholder
         let placeholderAttrs: [NSAttributedString.Key: Any] = [
             .foregroundColor: NSColor(white: 0.5, alpha: 1.0),
-            .font: NSFont.systemFont(ofSize: 18, weight: .regular)
+            .font: NSFont.systemFont(ofSize: 18, weight: .regular),
         ]
         searchField.placeholderAttributedString = NSAttributedString(
             string: "Search history...",
@@ -160,8 +165,8 @@ final class HistoryPaletteWindow: NSPanel {
 
     private func setupKeyMonitor() {
         localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, self.isVisible else { return event }
-            return self.handleKeyDown(event) ? nil : event
+            guard let self, isVisible else { return event }
+            return handleKeyDown(event) ? nil : event
         }
     }
 
@@ -174,30 +179,36 @@ final class HistoryPaletteWindow: NSPanel {
 
     private func setupClickOutsideMonitor() {
         // Local monitor: catches clicks within the app - check if outside our window
-        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            guard let self, self.isVisible else { return event }
-            
+        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [
+            .leftMouseDown,
+            .rightMouseDown,
+        ]) { [weak self] event in
+            guard let self, isVisible else { return event }
+
             // Convert click location to screen coordinates
             let clickLocation = event.locationInWindow
             if let eventWindow = event.window {
                 let screenLocation = eventWindow.convertPoint(toScreen: clickLocation)
                 // Check if click is outside our panel
-                if !self.frame.contains(screenLocation) {
-                    self.dismiss()
+                if !frame.contains(screenLocation) {
+                    dismiss()
                     return nil // Consume the event
                 }
             } else {
                 // Click with no window (shouldn't happen but handle it)
-                self.dismiss()
+                dismiss()
                 return nil
             }
             return event
         }
-        
+
         // Global monitor: catches clicks outside the app entirely
-        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            guard let self, self.isVisible else { return }
-            self.dismiss()
+        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [
+            .leftMouseDown,
+            .rightMouseDown,
+        ]) { [weak self] _ in
+            guard let self, isVisible else { return }
+            dismiss()
         }
     }
 
@@ -213,11 +224,16 @@ final class HistoryPaletteWindow: NSPanel {
     }
 
     private func setupCursorMonitor() {
-        mouseMovedMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .mouseEntered, .mouseExited, .scrollWheel]) { [weak self] event in
-            guard let self, self.isVisible else { return event }
+        mouseMovedMonitor = NSEvent.addLocalMonitorForEvents(matching: [
+            .mouseMoved,
+            .mouseEntered,
+            .mouseExited,
+            .scrollWheel,
+        ]) { [weak self] event in
+            guard let self, isVisible else { return event }
 
             let locationInWindow = event.locationInWindow
-            let scrollViewFrame = self.scrollView.frame
+            let scrollViewFrame = scrollView.frame
             let scrollerWidth: CGFloat = 15
             let tableAreaFrame = NSRect(
                 x: scrollViewFrame.origin.x,
@@ -297,11 +313,11 @@ final class HistoryPaletteWindow: NSPanel {
         // Activate app and show window
         NSApp.activate(ignoringOtherApps: true)
         makeKeyAndOrderFront(nil)
-        
+
         // Force first responder to search field
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.makeFirstResponder(self.searchField)
+            makeFirstResponder(searchField)
         }
 
         logInfo("History palette shown with \(records.count) records")
@@ -425,7 +441,6 @@ extension HistoryPaletteWindow: NSTableViewDelegate {
     }
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        let rowView = HistoryRowView()
-        return rowView
+        HistoryRowView()
     }
 }

@@ -1,5 +1,5 @@
-import XCTest
 @testable import Hisohiso
+import XCTest
 
 final class SinewBridgeTests: XCTestCase {
     // MARK: - Audio Level Calculation
@@ -54,8 +54,8 @@ final class SinewBridgeTests: XCTestCase {
         let levels = SinewBridge.calculateAudioLevels(from: samples)
 
         // First few bars should be louder than last few
-        let firstHalfAvg = levels[0 ..< 3].map(Int.init).reduce(0, +) / 3
-        let secondHalfAvg = levels[4 ..< 7].map(Int.init).reduce(0, +) / 3
+        let firstHalfAvg = levels[0..<3].map(Int.init).reduce(0, +) / 3
+        let secondHalfAvg = levels[4..<7].map(Int.init).reduce(0, +) / 3
         XCTAssertGreaterThan(firstHalfAvg, secondHalfAvg)
     }
 

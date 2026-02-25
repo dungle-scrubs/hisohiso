@@ -50,7 +50,7 @@ enum AudioEncoder {
 // MARK: - Data Extensions
 
 private extension Data {
-    mutating func append<T: FixedWidthInteger>(littleEndian value: T) {
+    mutating func append(littleEndian value: some FixedWidthInteger) {
         var value = value.littleEndian
         Swift.withUnsafeBytes(of: &value) { buffer in
             append(contentsOf: buffer)

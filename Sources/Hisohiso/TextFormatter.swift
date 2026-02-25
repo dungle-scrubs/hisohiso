@@ -8,7 +8,7 @@ struct TextFormatter {
     /// they frequently appear in legitimate speech.
     static let defaultFillerWords: Set<String> = [
         "um", "uh", "er", "ah", "you know", "i mean",
-        "kind of", "sort of"
+        "kind of", "sort of",
     ]
 
     private let removeFillers: Bool
@@ -31,13 +31,12 @@ struct TextFormatter {
         capitalizeSentences: Bool = true
     ) {
         // Load from UserDefaults if not provided
-        let words: Set<String>
-        if let fillerWords {
-            words = fillerWords
+        let words: Set<String> = if let fillerWords {
+            fillerWords
         } else if let saved = UserDefaults.standard.stringArray(for: .fillerWords) {
-            words = Set(saved)
+            Set(saved)
         } else {
-            words = Self.defaultFillerWords
+            Self.defaultFillerWords
         }
 
         self.removeFillers = removeFillers
@@ -45,7 +44,7 @@ struct TextFormatter {
         self.capitalizeSentences = capitalizeSentences
 
         // Precompile regexes sorted by length descending (match longer phrases first)
-        self.fillerRegexes = words
+        fillerRegexes = words
             .sorted { $0.count > $1.count }
             .compactMap { filler in
                 let escaped = NSRegularExpression.escapedPattern(for: filler)
@@ -106,7 +105,7 @@ struct TextFormatter {
 
         var chars = Array(text)
         var shouldCapitalize = capitalizeFirst
-        /// Track if we just saw sentence-ending punctuation and are scanning for whitespace.
+        // Track if we just saw sentence-ending punctuation and are scanning for whitespace.
         var pendingCapitalize = false
 
         for i in 0..<chars.count {
@@ -120,10 +119,10 @@ struct TextFormatter {
                 if [".", "!", "?"].contains(String(chars[i])) {
                     // Don't capitalize yet — wait for whitespace to confirm sentence boundary
                     pendingCapitalize = true
-                } else if pendingCapitalize && chars[i].isWhitespace {
+                } else if pendingCapitalize, chars[i].isWhitespace {
                     shouldCapitalize = true
                     pendingCapitalize = false
-                } else if pendingCapitalize && !chars[i].isWhitespace && chars[i] != "." && chars[i] != "!" && chars[i] != "?" {
+                } else if pendingCapitalize, !chars[i].isWhitespace, chars[i] != ".", chars[i] != "!", chars[i] != "?" {
                     // Non-whitespace after punctuation (e.g., "3.5", "e.g.") — not a sentence boundary
                     pendingCapitalize = false
                 }

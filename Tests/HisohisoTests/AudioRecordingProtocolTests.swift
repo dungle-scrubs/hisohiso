@@ -1,5 +1,5 @@
-import XCTest
 @testable import Hisohiso
+import XCTest
 
 /// Tests that both recorder implementations conform to AudioRecording protocol.
 ///

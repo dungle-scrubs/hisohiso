@@ -80,7 +80,7 @@ final class GlobeKeyMonitor {
     }
 
     private func handleGlobeState(pressed: Bool, source: String) {
-        if pressed && !isGlobePressed {
+        if pressed, !isGlobePressed {
             isGlobePressed = true
             pressTime = Date()
             isHolding = false
@@ -88,12 +88,12 @@ final class GlobeKeyMonitor {
 
             // Schedule hold detection
             DispatchQueue.main.asyncAfter(deadline: .now() + holdThreshold) { [weak self] in
-                guard let self, self.isGlobePressed, !self.isHolding else { return }
-                self.isHolding = true
+                guard let self, isGlobePressed, !self.isHolding else { return }
+                isHolding = true
                 logInfo("Globe key hold started")
-                self.onGlobeHoldStart?()
+                onGlobeHoldStart?()
             }
-        } else if !pressed && isGlobePressed {
+        } else if !pressed, isGlobePressed {
             isGlobePressed = false
             let pressDuration = pressTime.map { Date().timeIntervalSince($0) } ?? 0
 
@@ -114,7 +114,7 @@ final class GlobeKeyMonitor {
         let trusted = AXIsProcessTrusted()
         logDebug("AXIsProcessTrusted() = \(trusted)")
 
-        if !trusted && prompt {
+        if !trusted, prompt {
             let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
             _ = AXIsProcessTrustedWithOptions(options)
         }

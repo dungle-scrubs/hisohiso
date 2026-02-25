@@ -39,7 +39,7 @@ private class WaveformView: NSView {
         let totalWidth = CGFloat(barCount) * barWidth + CGFloat(barCount - 1) * barSpacing
         let startX = (bounds.width - totalWidth) / 2
 
-        for i in 0 ..< barCount {
+        for i in 0..<barCount {
             let bar = CALayer()
             bar.backgroundColor = NSColor.white.withAlphaComponent(0.9).cgColor
             bar.cornerRadius = 1
@@ -151,11 +151,10 @@ final class FloatingPillWindow: NSWindow {
         }
 
         // Determine pill width
-        let idealWidth: CGFloat
-        if case .error = state {
-            idealWidth = 320
+        let idealWidth: CGFloat = if case .error = state {
+            320
         } else {
-            idealWidth = 100
+            100
         }
 
         let pillView = ClickableView(frame: NSRect(x: 0, y: 0, width: idealWidth, height: 44))
@@ -212,7 +211,10 @@ final class FloatingPillWindow: NSWindow {
         makeKeyAndOrderFront(nil)
 
         if case .error = state {
-            autoDismissTimer = Timer.scheduledTimer(withTimeInterval: AppConstants.errorAutoDismissDelay, repeats: false) { [weak self] _ in
+            autoDismissTimer = Timer.scheduledTimer(
+                withTimeInterval: AppConstants.errorAutoDismissDelay,
+                repeats: false
+            ) { [weak self] _ in
                 self?.orderOut(nil)
                 self?.waveformView = nil
                 onDismiss()

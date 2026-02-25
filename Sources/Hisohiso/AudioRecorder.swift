@@ -31,16 +31,16 @@ enum AudioRecorderError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .engineStartFailed(let error):
-            return "Failed to start audio engine: \(error.localizedDescription)"
+        case let .engineStartFailed(error):
+            "Failed to start audio engine: \(error.localizedDescription)"
         case .noInputNode:
-            return "No audio input node available"
+            "No audio input node available"
         case .permissionDenied:
-            return "Microphone permission denied"
+            "Microphone permission denied"
         case .notRecording:
-            return "Not currently recording"
+            "Not currently recording"
         case .deviceNotFound:
-            return "Selected audio device not found"
+            "Selected audio device not found"
         }
     }
 }
@@ -365,7 +365,9 @@ final class AudioRecorder: @unchecked Sendable, AudioRecording {
         let trimmed = AudioDSP.trimSilence(filtered)
         let normalizedSamples = AudioDSP.normalize(trimmed)
 
-        logInfo("Recording stopped: \(samples.count) raw → \(normalizedSamples.count) processed samples (\(String(format: "%.1f", Double(normalizedSamples.count) / targetSampleRate))s)")
+        logInfo(
+            "Recording stopped: \(samples.count) raw → \(normalizedSamples.count) processed samples (\(String(format: "%.1f", Double(normalizedSamples.count) / targetSampleRate))s)"
+        )
         return normalizedSamples
     }
 
@@ -384,9 +386,9 @@ final class AudioRecorder: @unchecked Sendable, AudioRecording {
 
         logInfo("Recording cancelled")
     }
-    
+
     // MARK: - Monitoring Mode (for wake word detection)
-    
+
     /// Start continuous audio monitoring for wake word detection.
     /// Samples are delivered to the `onMonitoringSamples` callback.
     /// - Throws: `AudioRecorderError` if the engine fails to start.
@@ -395,7 +397,7 @@ final class AudioRecorder: @unchecked Sendable, AudioRecording {
             logDebug("Already monitoring or recording")
             return
         }
-        
+
         try applySelectedDevice()
 
         let (tapFormat, tapSampleRate) = try monoTapFormat()
@@ -406,7 +408,7 @@ final class AudioRecorder: @unchecked Sendable, AudioRecording {
         engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: tapFormat) { [weak self] buffer, _ in
             self?.processMonitoringBuffer(buffer, sampleRate: tapSampleRate)
         }
-        
+
         do {
             try engine.start()
             state = .monitoring
@@ -416,7 +418,7 @@ final class AudioRecorder: @unchecked Sendable, AudioRecording {
             throw AudioRecorderError.engineStartFailed(error)
         }
     }
-    
+
     /// Stop audio monitoring
     func stopMonitoring() {
         guard state == .monitoring else { return }
@@ -426,7 +428,7 @@ final class AudioRecorder: @unchecked Sendable, AudioRecording {
         state = .idle
         logInfo("Audio monitoring stopped")
     }
-    
+
     /// Pause monitoring (when recording starts)
     func pauseMonitoring() {
         guard state == .monitoring else { return }
@@ -435,7 +437,7 @@ final class AudioRecorder: @unchecked Sendable, AudioRecording {
         // State stays .monitoring — startRecording() reads it to decide .recordingFromMonitoring
         logDebug("Audio monitoring paused")
     }
-    
+
     /// Resume monitoring (after recording stops)
     func resumeMonitoring() {
         guard state == .monitoring else { return }
@@ -454,13 +456,13 @@ final class AudioRecorder: @unchecked Sendable, AudioRecording {
             state = .idle
         }
     }
-    
+
     private func processMonitoringBuffer(_ buffer: AVAudioPCMBuffer, sampleRate: Double) {
         guard let channelData = buffer.floatChannelData else { return }
-        
+
         let frameCount = Int(buffer.frameLength)
         let samples = Array(UnsafeBufferPointer(start: channelData[0], count: frameCount))
-        
+
         // Send to callback
         onMonitoringSamples?(samples, sampleRate)
     }
@@ -500,11 +502,10 @@ final class AudioRecorder: @unchecked Sendable, AudioRecording {
         }
 
         // Resample to 16kHz if needed
-        let resampledSamples: [Float]
-        if abs(inputSampleRate - targetSampleRate) > 1 {
-            resampledSamples = resample(monoSamples, from: inputSampleRate, to: targetSampleRate)
+        let resampledSamples: [Float] = if abs(inputSampleRate - targetSampleRate) > 1 {
+            resample(monoSamples, from: inputSampleRate, to: targetSampleRate)
         } else {
-            resampledSamples = monoSamples
+            monoSamples
         }
 
         stateLock.lock()
@@ -516,5 +517,4 @@ final class AudioRecorder: @unchecked Sendable, AudioRecording {
     private func resample(_ samples: [Float], from sourceSampleRate: Double, to targetSampleRate: Double) -> [Float] {
         AudioDSP.resample(samples, from: sourceSampleRate, to: targetSampleRate)
     }
-
 }

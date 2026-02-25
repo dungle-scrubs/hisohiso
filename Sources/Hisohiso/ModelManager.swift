@@ -1,6 +1,6 @@
+import FluidAudio
 import Foundation
 import WhisperKit
-import FluidAudio
 
 /// Manages model downloads and storage for both WhisperKit and FluidAudio
 @MainActor
@@ -25,7 +25,8 @@ final class ModelManager: ObservableObject {
     init() {
         // Load saved model selection
         if let savedModel = UserDefaults.standard.string(for: .selectedModel),
-           let model = TranscriptionModel(rawValue: savedModel) {
+           let model = TranscriptionModel(rawValue: savedModel)
+        {
             selectedModel = model
         }
 
@@ -121,7 +122,11 @@ final class ModelManager: ObservableObject {
 
     private func downloadParakeetModel(_ model: TranscriptionModel) async throws {
         guard let version = model.asrModelVersion else {
-            throw NSError(domain: "ModelManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid model version"])
+            throw NSError(
+                domain: "ModelManager",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Invalid model version"]
+            )
         }
 
         logInfo("Downloading Parakeet \(version) models via FluidAudio...")

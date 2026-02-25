@@ -1,6 +1,6 @@
 import Carbon.HIToolbox
-import XCTest
 @testable import Hisohiso
+import XCTest
 
 final class KeyComboTests: XCTestCase {
     // MARK: - Initialization

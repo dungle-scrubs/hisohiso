@@ -10,9 +10,9 @@ enum TextInserterError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .accessibilityNotGranted:
-            return "Accessibility permission not granted"
+            "Accessibility permission not granted"
         case .insertionFailed:
-            return "Failed to insert text"
+            "Failed to insert text"
         }
     }
 }
@@ -118,7 +118,10 @@ final class TextInserter {
     /// - Parameters:
     ///   - snapshot: Snapshot captured by `snapshotPasteboard`.
     ///   - pasteboard: Pasteboard to restore.
-    private static func restorePasteboard(_ snapshot: [[NSPasteboard.PasteboardType: Data]], to pasteboard: NSPasteboard) {
+    private static func restorePasteboard(
+        _ snapshot: [[NSPasteboard.PasteboardType: Data]],
+        to pasteboard: NSPasteboard
+    ) {
         pasteboard.clearContents()
         guard !snapshot.isEmpty else { return }
 

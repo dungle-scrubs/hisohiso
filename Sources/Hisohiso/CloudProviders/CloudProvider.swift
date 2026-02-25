@@ -30,19 +30,19 @@ enum CloudTranscriptionError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notConfigured:
-            return "Cloud provider not configured"
+            "Cloud provider not configured"
         case .invalidAPIKey:
-            return "Invalid API key"
+            "Invalid API key"
         case .rateLimited:
-            return "Rate limited - please try again later"
-        case .networkError(let error):
-            return "Network error: \(error.localizedDescription)"
+            "Rate limited - please try again later"
+        case let .networkError(error):
+            "Network error: \(error.localizedDescription)"
         case .invalidResponse:
-            return "Invalid response from server"
-        case .apiError(let message):
-            return "API error: \(message)"
+            "Invalid response from server"
+        case let .apiError(message):
+            "API error: \(message)"
         case .audioEncodingFailed:
-            return "Failed to encode audio"
+            "Failed to encode audio"
         }
     }
 }
@@ -50,19 +50,19 @@ enum CloudTranscriptionError: Error, LocalizedError {
 /// Available cloud providers
 enum CloudProviderType: String, CaseIterable {
     case openAI = "openai"
-    case groq = "groq"
+    case groq
 
     var displayName: String {
         switch self {
-        case .openAI: return "OpenAI Whisper"
-        case .groq: return "Groq Whisper"
+        case .openAI: "OpenAI Whisper"
+        case .groq: "Groq Whisper"
         }
     }
 
     var keychainType: KeychainManager.APIKeyType {
         switch self {
-        case .openAI: return .openAI
-        case .groq: return .groq
+        case .openAI: .openAI
+        case .groq: .groq
         }
     }
 }

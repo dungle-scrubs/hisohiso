@@ -39,7 +39,10 @@ final class SinewBridge: @unchecked Sendable {
 
     /// Whether to use Sinew for visualization.
     var useSinewVisualization: Bool {
-        get { UserDefaults.standard.hasValue(for: .useSinewVisualization) ? UserDefaults.standard.bool(for: .useSinewVisualization) : true }
+        get {
+            UserDefaults.standard.hasValue(for: .useSinewVisualization) ? UserDefaults.standard
+                .bool(for: .useSinewVisualization) : true
+        }
         set { UserDefaults.standard.set(newValue, for: .useSinewVisualization) }
     }
 
@@ -74,16 +77,15 @@ final class SinewBridge: @unchecked Sendable {
     func sendState(_ state: RecordingState) {
         guard useSinewVisualization else { return }
 
-        let command: String
-        switch state {
+        let command = switch state {
         case .idle:
-            command = "state idle"
+            "state idle"
         case .recording:
-            command = "state recording"
+            "state recording"
         case .transcribing:
-            command = "state transcribing"
+            "state transcribing"
         case .error:
-            command = "state error"
+            "state error"
         }
         send(command)
     }
@@ -100,10 +102,10 @@ final class SinewBridge: @unchecked Sendable {
     func checkAvailability() {
         queue.async { [weak self] in
             guard let self else { return }
-            self._isAvailable = FileManager.default.fileExists(atPath: self.socketPath)
+            _isAvailable = FileManager.default.fileExists(atPath: socketPath)
 
-            if self._isAvailable {
-                logDebug("Sinew hisohiso socket available at \(self.socketPath)")
+            if _isAvailable {
+                logDebug("Sinew hisohiso socket available at \(socketPath)")
             }
         }
     }
@@ -176,7 +178,7 @@ final class SinewBridge: @unchecked Sendable {
     private func send(_ command: String) {
         queue.async { [weak self] in
             guard let self else { return }
-            guard self.ensureConnected() else { return }
+            guard ensureConnected() else { return }
 
             let message = command + "\n"
             let written = message.withCString { ptr -> Int in
@@ -186,7 +188,7 @@ final class SinewBridge: @unchecked Sendable {
             if written < 0 {
                 // Connection broken — drop and retry next time
                 logDebug("Sinew: Write failed, disconnecting")
-                self.disconnect()
+                disconnect()
             }
         }
     }
@@ -208,7 +210,7 @@ extension SinewBridge {
         var levels = [UInt8]()
         levels.reserveCapacity(numBars)
 
-        for i in 0 ..< numBars {
+        for i in 0..<numBars {
             let start = i * chunkSize
             guard start < samples.count else {
                 levels.append(0)

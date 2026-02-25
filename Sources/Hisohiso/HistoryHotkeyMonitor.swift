@@ -13,7 +13,7 @@ final class HistoryHotkeyMonitor {
     var onHotkey: (() -> Void)?
 
     /// Current hotkey configuration
-    private(set) var keyCode: UInt16 = UInt16(kVK_Space)
+    private(set) var keyCode: UInt16 = .init(kVK_Space)
     private(set) var modifiers: CGEventFlags = [.maskControl, .maskAlternate]
 
     deinit {
@@ -31,7 +31,7 @@ final class HistoryHotkeyMonitor {
             eventTypes: [.keyDown]
         ) { [weak self] event, _ in
             guard let self else { return false }
-            return self.handleKeyDown(event)
+            return handleKeyDown(event)
         }
 
         guard EventTapManager.shared.start() else {

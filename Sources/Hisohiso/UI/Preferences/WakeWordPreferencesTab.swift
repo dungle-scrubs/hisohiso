@@ -13,7 +13,9 @@ final class WakeWordPreferencesTab: NSView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     private func setupViews() {
         var y = 290
@@ -24,12 +26,19 @@ final class WakeWordPreferencesTab: NSView {
         addSubview(header)
         y -= 30
 
-        wakeWordToggle = NSButton(checkboxWithTitle: "Enable wake word detection", target: self, action: #selector(toggleChanged))
+        wakeWordToggle = NSButton(
+            checkboxWithTitle: "Enable wake word detection",
+            target: self,
+            action: #selector(toggleChanged)
+        )
         wakeWordToggle.frame = NSRect(x: 20, y: y, width: 300, height: 20)
         addSubview(wakeWordToggle)
         y -= 25
 
-        let desc = NSTextField(wrappingLabelWithString: "Say your wake phrase to start recording without pressing any keys. Uses Whisper tiny for continuous listening.")
+        let desc =
+            NSTextField(
+                wrappingLabelWithString: "Say your wake phrase to start recording without pressing any keys. Uses Whisper tiny for continuous listening."
+            )
         desc.frame = NSRect(x: 40, y: y - 20, width: 380, height: 40)
         desc.font = .systemFont(ofSize: 11)
         desc.textColor = .secondaryLabelColor
@@ -61,7 +70,10 @@ final class WakeWordPreferencesTab: NSView {
         addSubview(statusLabel)
         y -= 40
 
-        let warning = NSTextField(wrappingLabelWithString: "⚠️ Wake word detection keeps the microphone active and uses some CPU. This may impact battery life on laptops.")
+        let warning =
+            NSTextField(
+                wrappingLabelWithString: "⚠️ Wake word detection keeps the microphone active and uses some CPU. This may impact battery life on laptops."
+            )
         warning.frame = NSRect(x: 20, y: y - 20, width: 400, height: 40)
         warning.font = .systemFont(ofSize: 11)
         warning.textColor = .systemOrange

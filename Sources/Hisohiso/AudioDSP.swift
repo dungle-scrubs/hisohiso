@@ -21,7 +21,7 @@ enum AudioDSP {
         guard outputLength > 0 else { return [] }
 
         var output = [Float](repeating: 0, count: outputLength)
-        var control = (0 ..< outputLength).map { Float($0) * ratio }
+        var control = (0..<outputLength).map { Float($0) * ratio }
         vDSP_vlint(samples, &control, 1, &output, 1, vDSP_Length(outputLength), vDSP_Length(samples.count))
 
         return output
@@ -51,7 +51,7 @@ enum AudioDSP {
 
         let a0 = 1.0 + alpha
         let b0 = ((1.0 + cosW0) / 2.0) / a0
-        let b1 = (-(1.0 + cosW0)) / a0
+        let b1 = -(1.0 + cosW0) / a0
         let b2 = ((1.0 + cosW0) / 2.0) / a0
         let a1 = (-2.0 * cosW0) / a0
         let a2 = (1.0 - alpha) / a0

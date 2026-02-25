@@ -11,10 +11,10 @@ enum LogLevel: String {
 
     var osLogType: OSLogType {
         switch self {
-        case .debug: return .debug
-        case .info: return .info
-        case .warning: return .default
-        case .error: return .error
+        case .debug: .debug
+        case .info: .info
+        case .warning: .default
+        case .error: .error
         }
     }
 }
@@ -100,7 +100,9 @@ final class Logger: @unchecked Sendable {
     }
 
     /// Path to the current log file (for tail -f)
-    var logFilePath: String { logFileURL.path }
+    var logFilePath: String {
+        logFileURL.path
+    }
 
     /// Path to the logs directory.
     var logsDirectory: URL {
@@ -150,7 +152,8 @@ final class Logger: @unchecked Sendable {
     /// Remove log files older than `maxLogAgeDays`.
     private func pruneOldLogs(in directory: URL) {
         let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey]) else {
+        guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey])
+        else {
             return
         }
 

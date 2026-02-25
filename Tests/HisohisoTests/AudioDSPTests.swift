@@ -1,5 +1,5 @@
-import XCTest
 @testable import Hisohiso
+import XCTest
 
 final class AudioDSPTests: XCTestCase {
     // MARK: - Resample

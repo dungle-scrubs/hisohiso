@@ -18,7 +18,6 @@ import Darwin
 /// The breadcrumb file descriptor is opened once at install time and never closed
 /// until process exit. All other state is read-only after `install()`.
 enum CrashReporter {
-
     // MARK: - File Paths
 
     /// Directory for crash archives.
@@ -31,16 +30,12 @@ enum CrashReporter {
 
     /// Breadcrumb file written by signal/atexit handlers.
     /// Presence of this file on next launch indicates an unclean exit.
-    static let breadcrumbPath: URL = {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/Hisohiso/.crash-breadcrumb")
-    }()
+    static let breadcrumbPath: URL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Logs/Hisohiso/.crash-breadcrumb")
 
     /// PID file so we can detect if the previous instance's process ended.
-    static let pidFilePath: URL = {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/Hisohiso/.hisohiso.pid")
-    }()
+    static let pidFilePath: URL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Logs/Hisohiso/.hisohiso.pid")
 
     // MARK: - State
 
@@ -49,18 +44,18 @@ enum CrashReporter {
     ///
     /// Intentionally nonisolated: written once in `install()`, then only read
     /// from signal handlers which cannot use actors or async.
-    nonisolated(unsafe) private static var breadcrumbFD: Int32 = -1
+    private nonisolated(unsafe) static var breadcrumbFD: Int32 = -1
 
     /// Set to `true` when `applicationWillTerminate` runs (clean shutdown).
     /// The `atexit` handler checks this to distinguish clean vs. dirty exits.
     ///
     /// Intentionally nonisolated: written on main thread in `markCleanShutdown()`,
     /// read in `atexit` handler. Single-writer, signal-safe.
-    nonisolated(unsafe) private(set) static var cleanShutdown = false
+    private(set) nonisolated(unsafe) static var cleanShutdown = false
 
     /// Signals we intercept.
     private static let signals: [Int32] = [
-        SIGABRT, SIGBUS, SIGFPE, SIGILL, SIGSEGV, SIGTRAP, SIGTERM
+        SIGABRT, SIGBUS, SIGFPE, SIGILL, SIGSEGV, SIGTRAP, SIGTERM,
     ]
 
     // MARK: - Install
@@ -231,14 +226,14 @@ enum CrashReporter {
     /// Map signal number to name. Pure function, no allocation.
     private static func signalName(_ sig: Int32) -> String {
         switch sig {
-        case SIGABRT: return "SIGABRT"
-        case SIGBUS: return "SIGBUS"
-        case SIGFPE: return "SIGFPE"
-        case SIGILL: return "SIGILL"
-        case SIGSEGV: return "SIGSEGV"
-        case SIGTRAP: return "SIGTRAP"
-        case SIGTERM: return "SIGTERM"
-        default: return "SIG_\(sig)"
+        case SIGABRT: "SIGABRT"
+        case SIGBUS: "SIGBUS"
+        case SIGFPE: "SIGFPE"
+        case SIGILL: "SIGILL"
+        case SIGSEGV: "SIGSEGV"
+        case SIGTRAP: "SIGTRAP"
+        case SIGTERM: "SIGTERM"
+        default: "SIG_\(sig)"
         }
     }
 
@@ -315,13 +310,16 @@ enum CrashReporter {
         lines.append("Uptime: \(Int(process.systemUptime)) seconds")
 
         // Read previous PID if available
-        if let pidStr = try? String(contentsOf: pidFilePath, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines) {
+        if let pidStr = try? String(contentsOf: pidFilePath, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        {
             lines.append("Previous PID: \(pidStr)")
         }
 
         // Disk space
         if let attrs = try? fileManager.attributesOfFileSystem(forPath: NSHomeDirectory()),
-           let freeBytes = attrs[.systemFreeSize] as? Int64 {
+           let freeBytes = attrs[.systemFreeSize] as? Int64
+        {
             lines.append("Free Disk: \(freeBytes / (1024 * 1024 * 1024)) GB")
         }
 
@@ -335,9 +333,12 @@ enum CrashReporter {
             .appendingPathComponent("Library/Logs/Hisohiso")
         let fileManager = FileManager.default
 
-        guard let files = try? fileManager.contentsOfDirectory(at: logsDir, includingPropertiesForKeys: [.creationDateKey])
-            .filter({ $0.lastPathComponent.hasPrefix("hisohiso-") && $0.pathExtension == "log" })
-            .sorted(by: { $0.lastPathComponent > $1.lastPathComponent })
+        guard let files = try? fileManager.contentsOfDirectory(
+            at: logsDir,
+            includingPropertiesForKeys: [.creationDateKey]
+        )
+        .filter({ $0.lastPathComponent.hasPrefix("hisohiso-") && $0.pathExtension == "log" })
+        .sorted(by: { $0.lastPathComponent > $1.lastPathComponent })
         else { return }
 
         for file in files.prefix(2) {
@@ -355,10 +356,10 @@ enum CrashReporter {
     /// binary in `/opt/homebrew/bin/` doesn't have.
     private static func showCrashNotification(archivePath: URL) {
         let script = """
-            display notification "Crash data archived to \(archivePath.lastPathComponent)" \
-                with title "Hisohiso recovered from a crash" \
-                sound name "Submarine"
-            """
+        display notification "Crash data archived to \(archivePath.lastPathComponent)" \
+            with title "Hisohiso recovered from a crash" \
+            sound name "Submarine"
+        """
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         process.arguments = ["-e", script]
