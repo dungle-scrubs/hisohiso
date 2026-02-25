@@ -25,8 +25,7 @@ final class ModelManager: ObservableObject {
     init() {
         // Load saved model selection
         if let savedModel = UserDefaults.standard.string(for: .selectedModel),
-           let model = TranscriptionModel(rawValue: savedModel)
-        {
+           let model = TranscriptionModel(rawValue: savedModel) {
             selectedModel = model
         }
 
@@ -39,10 +38,8 @@ final class ModelManager: ObservableObject {
     func refreshDownloadedModels() async {
         var downloaded: Set<TranscriptionModel> = []
 
-        for model in TranscriptionModel.allCases {
-            if await isModelDownloaded(model) {
-                downloaded.insert(model)
-            }
+        for model in TranscriptionModel.allCases where await isModelDownloaded(model) {
+            downloaded.insert(model)
         }
 
         downloadedModels = downloaded

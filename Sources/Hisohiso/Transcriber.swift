@@ -150,7 +150,7 @@ actor Transcriber {
     /// Cloud providers for fallback, in priority order.
     private let cloudProviders: [(type: CloudProviderType, provider: CloudProvider)] = [
         (.openAI, OpenAIProvider()),
-        (.groq, GroqProvider()),
+        (.groq, GroqProvider())
     ]
 
     /// Cloud fallback settings
@@ -258,8 +258,7 @@ actor Transcriber {
 
         // Try preferred provider first
         if let entry = cloudProviders.first(where: { $0.type == preferredType }),
-           entry.provider.isConfigured
-        {
+           entry.provider.isConfigured {
             attemptedProvider = true
             logInfo("Transcribing with cloud provider: \(entry.provider.displayName)")
             do {

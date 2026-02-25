@@ -55,7 +55,7 @@ enum CrashReporter {
 
     /// Signals we intercept.
     private static let signals: [Int32] = [
-        SIGABRT, SIGBUS, SIGFPE, SIGILL, SIGSEGV, SIGTRAP, SIGTERM,
+        SIGABRT, SIGBUS, SIGFPE, SIGILL, SIGSEGV, SIGTRAP, SIGTERM
     ]
 
     // MARK: - Install
@@ -311,15 +311,13 @@ enum CrashReporter {
 
         // Read previous PID if available
         if let pidStr = try? String(contentsOf: pidFilePath, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        {
+            .trimmingCharacters(in: .whitespacesAndNewlines) {
             lines.append("Previous PID: \(pidStr)")
         }
 
         // Disk space
         if let attrs = try? fileManager.attributesOfFileSystem(forPath: NSHomeDirectory()),
-           let freeBytes = attrs[.systemFreeSize] as? Int64
-        {
+           let freeBytes = attrs[.systemFreeSize] as? Int64 {
             lines.append("Free Disk: \(freeBytes / (1024 * 1024 * 1024)) GB")
         }
 

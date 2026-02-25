@@ -5,7 +5,8 @@ import SwiftUI
 /// Main application entry point
 @main
 struct HisohisoApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @NSApplicationDelegateAdaptor(AppDelegate.self)
+    var appDelegate
 
     var body: some Scene {
         // Menu bar app - no main window
@@ -96,10 +97,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Handle Apple Events (for `open -a Hisohiso --args --history`)
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls {
-            if url.scheme == "hisohiso" {
-                handleURL(url)
-            }
+        for url in urls where url.scheme == "hisohiso" {
+            handleURL(url)
         }
     }
 

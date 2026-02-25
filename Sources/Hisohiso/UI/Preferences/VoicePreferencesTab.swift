@@ -145,8 +145,7 @@ final class VoicePreferencesTab: NSView {
     }
 
     @objc private func startEnrollment() {
-        if isRecordingEnrollment { stopEnrollmentRecording() }
-        else { beginEnrollment() }
+        if isRecordingEnrollment { stopEnrollmentRecording() } else { beginEnrollment() }
     }
 
     private func beginEnrollment() {
@@ -171,8 +170,7 @@ final class VoicePreferencesTab: NSView {
                     enrollmentSamples.append(samples)
                     progressLabel.stringValue = "🎤 Keep speaking... (\(enrollmentSamples.count) samples)"
                 }
-                if enrollmentSamples.count < 3 { collectEnrollmentSample() }
-                else { stopEnrollmentRecording() }
+                if enrollmentSamples.count < 3 { collectEnrollmentSample() } else { stopEnrollmentRecording() }
             }
         } catch {
             logError("Failed to start enrollment recording: \(error)")

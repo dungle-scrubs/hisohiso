@@ -48,7 +48,7 @@ final class PreferencesWindow: NSWindow {
             ("model", "Model", modelTab),
             ("cloud", "Cloud", cloudTab),
             ("voice", "Voice", voiceTab),
-            ("wakeword", "Wake Word", wakeWordTab),
+            ("wakeword", "Wake Word", wakeWordTab)
         ]
 
         for (id, label, view) in tabs {

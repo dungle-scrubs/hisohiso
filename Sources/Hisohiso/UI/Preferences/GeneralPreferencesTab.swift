@@ -159,8 +159,7 @@ final class GeneralPreferencesTab: NSView {
     @objc private func launchAtLoginChanged() {
         guard supportsLaunchAtLogin else { launchAtLoginToggle.state = .off; return }
         do {
-            if launchAtLoginToggle.state == .on { try SMAppService.mainApp.register() }
-            else { try SMAppService.mainApp.unregister() }
+            if launchAtLoginToggle.state == .on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
         } catch {
             logError("Failed to update launch at login: \(error)")
             launchAtLoginToggle.state = SMAppService.mainApp.status == .enabled ? .on : .off

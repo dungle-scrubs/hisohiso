@@ -113,7 +113,7 @@ class BaseCloudProvider: CloudProvider {
         body.appendFormField("model", value: model, boundary: boundary)
         body.appendFormFile("file", filename: "audio.wav", contentType: "audio/wav", data: wavData, boundary: boundary)
         body.appendFormField("response_format", value: "json", boundary: boundary)
-        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        body.append(Data("--\(boundary)--\r\n".utf8))
         request.httpBody = body
 
         logInfo("\(displayName): sending \(wavData.count) bytes of audio")
@@ -155,16 +155,16 @@ class BaseCloudProvider: CloudProvider {
 
 private extension Data {
     mutating func appendFormField(_ name: String, value: String, boundary: String) {
-        append("--\(boundary)\r\n".data(using: .utf8)!)
-        append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
-        append("\(value)\r\n".data(using: .utf8)!)
+        append(Data("--\(boundary)\r\n".utf8))
+        append(Data("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".utf8))
+        append(Data("\(value)\r\n".utf8))
     }
 
     mutating func appendFormFile(_ name: String, filename: String, contentType: String, data: Data, boundary: String) {
-        append("--\(boundary)\r\n".data(using: .utf8)!)
-        append("Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
-        append("Content-Type: \(contentType)\r\n\r\n".data(using: .utf8)!)
+        append(Data("--\(boundary)\r\n".utf8))
+        append(Data("Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\r\n".utf8))
+        append(Data("Content-Type: \(contentType)\r\n\r\n".utf8))
         append(data)
-        append("\r\n".data(using: .utf8)!)
+        append(Data("\r\n".utf8))
     }
 }

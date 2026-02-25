@@ -27,7 +27,7 @@ final class AppSettingsTests: XCTestCase {
             .useSinewVisualization, .showFloatingPill,
             .voiceVerificationEnabled, .voiceVerificationThreshold,
             .cloudFallbackEnabled, .cloudFallbackProvider,
-            .fillerWords, .hasCompletedOnboarding,
+            .fillerWords, .hasCompletedOnboarding
         ]
 
         let rawValues = allKeys.map(\.rawValue)
