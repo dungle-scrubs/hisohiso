@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/dungle-scrubs/hisohiso/compare/v0.2.0...v0.2.1) (2026-02-25)
+
+
+### Added
+
+* crash reporter and launchd auto-restart ([#15](https://github.com/dungle-scrubs/hisohiso/issues/15)) ([579c069](https://github.com/dungle-scrubs/hisohiso/commit/579c069901165e49b8f94d1672f6549d0cf9b767))
+
 ## [0.2.0](https://github.com/dungle-scrubs/hisohiso/compare/v0.1.0...v0.2.0) (2026-02-24)
 
 
