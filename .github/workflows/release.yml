@@ -51,14 +51,29 @@ jobs:
 
       - name: Update Homebrew formula
         run: |
-          # Update SHA and version in formula
           curl -L -o source.tar.gz \
             "https://github.com/dungle-scrubs/hisohiso/archive/refs/tags/${{ needs.release-please.outputs.tag_name }}.tar.gz"
           SHA=$(shasum -a 256 source.tar.gz | cut -d' ' -f1)
           sed -i '' "s/sha256 \".*\"/sha256 \"$SHA\"/" Formula/hisohiso.rb
           sed -i '' "s|/v[0-9]*\.[0-9]*\.[0-9]*.tar.gz|/${{ needs.release-please.outputs.tag_name }}.tar.gz|g" Formula/hisohiso.rb
 
-      - name: Commit formula update
+      - name: Push formula to tap
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git clone https://x-access-token:${GH_TOKEN}@github.com/dungle-scrubs/homebrew-tap.git /tmp/homebrew-tap
+          mkdir -p /tmp/homebrew-tap/Formula
+          cp Formula/hisohiso.rb /tmp/homebrew-tap/Formula/hisohiso.rb
+          cd /tmp/homebrew-tap
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add Formula/hisohiso.rb
+          if ! git diff --staged --quiet; then
+            git commit -m "hisohiso ${{ needs.release-please.outputs.tag_name }}"
+            git push origin main
+          fi
+
+      - name: Commit formula to source repo
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
