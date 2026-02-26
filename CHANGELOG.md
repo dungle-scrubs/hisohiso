@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/dungle-scrubs/hisohiso/compare/v0.2.2...v0.2.3) (2026-02-26)
+
+
+### Maintenance
+
+* **ci:** disable codeql workflow ([#21](https://github.com/dungle-scrubs/hisohiso/issues/21)) ([f76474b](https://github.com/dungle-scrubs/hisohiso/commit/f76474be4584552252d7d61f74dc214ef8f03755))
+
 ## [0.2.2](https://github.com/dungle-scrubs/hisohiso/compare/v0.2.1...v0.2.2) (2026-02-26)
 
 
