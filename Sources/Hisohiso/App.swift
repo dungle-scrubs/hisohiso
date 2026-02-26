@@ -40,16 +40,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hasCompletedOnboardingKey = SettingsKey.hasCompletedOnboarding
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Install crash reporter FIRST — before anything else can fail
+        // Install crash reporter FIRST — before anything else can fail.
+        // Signal handlers are active immediately; breadcrumb FD opens below.
         CrashReporter.install()
 
         logInfo("Hisohiso starting...")
         logInfo("Log file: \(Logger.shared.logFilePath)")
 
-        // Check for previous crash and archive if found
+        // Check for previous crash BEFORE opening the breadcrumb FD.
+        // openBreadcrumbForWriting() creates/truncates the file, so calling
+        // it first would make checkPreviousCrash() always find a (empty) file.
         if let crashArchive = CrashReporter.checkPreviousCrash() {
             logWarning("Previous session crashed. Archive: \(crashArchive.path)")
         }
+
+        // Now open the breadcrumb FD so signal/atexit handlers can write to it
+        CrashReporter.openBreadcrumbForWriting()
 
         // Handle CLI arguments (e.g., --history from Sinew click)
         handleLaunchArguments()
