@@ -61,13 +61,26 @@ enum CrashReporter {
     // MARK: - Install
 
     /// Install all crash detection hooks. Call early in `applicationDidFinishLaunching`.
+    ///
+    /// **Order matters**: `checkPreviousCrash()` must run between `install()` and
+    /// any code that could crash, but `openBreadcrumbFD()` creates/truncates the
+    /// breadcrumb file. So we defer FD creation until `openBreadcrumbForWriting()`
+    /// is called explicitly after the check.
     static func install() {
         writePIDFile()
-        openBreadcrumbFD()
         installSignalHandlers()
         installExceptionHandler()
         installAtExit()
         logInfo("CrashReporter installed (PID \(ProcessInfo.processInfo.processIdentifier))")
+    }
+
+    /// Open the breadcrumb file for writing. Call AFTER `checkPreviousCrash()`.
+    ///
+    /// This creates/truncates the breadcrumb file so signal handlers can write
+    /// to it. Must be called after the previous-crash check, otherwise the check
+    /// will always find a (possibly empty) file and false-positive.
+    static func openBreadcrumbForWriting() {
+        openBreadcrumbFD()
     }
 
     /// Mark the shutdown as clean. Call from `applicationWillTerminate`.
@@ -82,6 +95,11 @@ enum CrashReporter {
 
     /// Check for a crash breadcrumb from a previous run.
     /// Archives the crash data if found.
+    ///
+    /// Only treats the breadcrumb as a real crash when the file exists AND has
+    /// non-empty content. An empty file (e.g., left by `openBreadcrumbFD`'s
+    /// `O_CREAT | O_TRUNC`) is cleaned up silently.
+    ///
     /// - Returns: Path to the crash archive, or `nil` if no crash detected.
     @discardableResult
     static func checkPreviousCrash() -> URL? {
@@ -89,14 +107,21 @@ enum CrashReporter {
             return nil
         }
 
-        let breadcrumb = (try? String(contentsOf: breadcrumbPath, encoding: .utf8)) ?? "unknown"
-        logWarning("Previous crash detected: \(breadcrumb.trimmingCharacters(in: .whitespacesAndNewlines))")
+        let raw = (try? String(contentsOf: breadcrumbPath, encoding: .utf8)) ?? ""
+        let breadcrumb = raw.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let archivePath = archiveCrash(breadcrumb: breadcrumb)
-
-        // Clean up breadcrumb
+        // Clean up the file regardless — it belongs to a previous run
         try? FileManager.default.removeItem(at: breadcrumbPath)
         try? FileManager.default.removeItem(at: pidFilePath)
+
+        // Empty breadcrumb = stale file, not a real crash
+        guard !breadcrumb.isEmpty else {
+            return nil
+        }
+
+        logWarning("Previous crash detected: \(breadcrumb)")
+
+        let archivePath = archiveCrash(breadcrumb: breadcrumb)
 
         if let archivePath {
             logInfo("Crash archive saved: \(archivePath.path)")
