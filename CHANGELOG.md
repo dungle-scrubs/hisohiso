@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.2](https://github.com/dungle-scrubs/hisohiso/compare/v0.2.1...v0.2.2) (2026-02-26)
+
+
+### Fixed
+
+* **crash-reporter:** avoid false crash loop on startup ([#19](https://github.com/dungle-scrubs/hisohiso/issues/19)) ([a592041](https://github.com/dungle-scrubs/hisohiso/commit/a5920419a096ae0e5cd5dea5695f8dd8333b2c64))
+
+
+### Maintenance
+
+* update formula for v0.2.1 ([#17](https://github.com/dungle-scrubs/hisohiso/issues/17)) ([1f98f74](https://github.com/dungle-scrubs/hisohiso/commit/1f98f747faac24e71940aecb6ff2a85e82d7d3bb))
+
 ## [0.2.1](https://github.com/dungle-scrubs/hisohiso/compare/v0.2.0...v0.2.1) (2026-02-25)
 
 
