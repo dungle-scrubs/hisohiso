@@ -36,12 +36,6 @@ jobs:
           cp .build/release/Hisohiso dist/
           tar -czvf hisohiso-${{ needs.release-please.outputs.tag_name }}-darwin-arm64.tar.gz -C dist Hisohiso
 
-      - name: Calculate SHA256
-        id: sha
-        run: |
-          SHA=$(shasum -a 256 hisohiso-${{ needs.release-please.outputs.tag_name }}-darwin-arm64.tar.gz | cut -d' ' -f1)
-          echo "sha256=$SHA" >> $GITHUB_OUTPUT
-
       - name: Upload release artifact
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -49,30 +43,49 @@ jobs:
           gh release upload ${{ needs.release-please.outputs.tag_name }} \
             hisohiso-${{ needs.release-please.outputs.tag_name }}-darwin-arm64.tar.gz
 
-      - name: Update Homebrew formula
-        run: |
-          # Update SHA and version in formula
-          curl -L -o source.tar.gz \
-            "https://github.com/dungle-scrubs/hisohiso/archive/refs/tags/${{ needs.release-please.outputs.tag_name }}.tar.gz"
-          SHA=$(shasum -a 256 source.tar.gz | cut -d' ' -f1)
-          sed -i '' "s/sha256 \".*\"/sha256 \"$SHA\"/" Formula/hisohiso.rb
-          sed -i '' "s|/v[0-9]*\.[0-9]*\.[0-9]*.tar.gz|/${{ needs.release-please.outputs.tag_name }}.tar.gz|g" Formula/hisohiso.rb
+      - name: Checkout Homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: dungle-scrubs/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+          fetch-depth: 0
 
-      - name: Commit formula update
+      - name: Update Homebrew formula in tap repo
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
+          curl -fsSL -o source.tar.gz "https://github.com/dungle-scrubs/hisohiso/archive/refs/tags/${TAG}.tar.gz"
+          SHA=$(shasum -a 256 source.tar.gz | awk '{print $1}')
+          perl -i -pe "s|url \".*\"|url \"https://github.com/dungle-scrubs/hisohiso/archive/refs/tags/${TAG}.tar.gz\"|; s|sha256 \".*\"|sha256 \"$SHA\"|" homebrew-tap/Formula/hisohiso.rb
+
+      - name: Commit, PR, and merge tap update
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          cd homebrew-tap
+
+          if git diff --quiet -- Formula/hisohiso.rb; then
+            echo "Formula already up to date for ${TAG}"
+            exit 0
+          fi
+
           git config user.name github-actions
           git config user.email github-actions@github.com
-          BRANCH="chore/formula-${{ needs.release-please.outputs.tag_name }}"
-          git checkout -b "$BRANCH"
+
+          BRANCH="chore/hisohiso-${TAG}"
+          git checkout -B "$BRANCH"
           git add Formula/hisohiso.rb
-          if ! git diff --staged --quiet; then
-            git commit -m "chore: update formula for ${{ needs.release-please.outputs.tag_name }}"
-            git push origin "$BRANCH"
-            gh pr create \
-              --title "chore: update formula for ${{ needs.release-please.outputs.tag_name }}" \
-              --body "Auto-updates Homebrew formula SHA for release ${{ needs.release-please.outputs.tag_name }}." \
-              --base main \
-              --head "$BRANCH"
-          fi
+          git commit -m "chore: bump hisohiso formula to ${TAG}"
+          git push --force-with-lease --set-upstream origin "$BRANCH"
+
+          PR_URL=$(gh pr create \
+            --repo dungle-scrubs/homebrew-tap \
+            --title "chore: bump hisohiso formula to ${TAG}" \
+            --body "Auto-updates formula URL and SHA for ${TAG}." \
+            --base main \
+            --head "$BRANCH" \
+            || gh pr view "$BRANCH" --repo dungle-scrubs/homebrew-tap --json url -q .url)
+
+          gh pr merge --repo dungle-scrubs/homebrew-tap "$PR_URL" --squash --delete-branch
