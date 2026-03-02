@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.5](https://github.com/dungle-scrubs/hisohiso/compare/v0.2.4...v0.2.5) (2026-03-02)
+
+
+### Added
+
+* **release:** add app bundle and Homebrew cask pipeline ([9a1932f](https://github.com/dungle-scrubs/hisohiso/commit/9a1932fe5f00991caf5c73b5d1f439a3d2eaa033))
+
 ## [0.2.4](https://github.com/dungle-scrubs/hisohiso/compare/v0.2.3...v0.2.4) (2026-03-02)
 
 
