@@ -28,7 +28,7 @@ jobs:
       app_asset_name: ${{ steps.package.outputs.asset_name }}
       app_asset_sha256: ${{ steps.package.outputs.asset_sha256 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Build app bundle
         run: scripts/build-app-bundle.sh "${{ needs.release-please.outputs.tag_name }}" dist
@@ -59,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Homebrew tap
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: dungle-scrubs/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
