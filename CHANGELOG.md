@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.4](https://github.com/dungle-scrubs/hisohiso/compare/v0.2.3...v0.2.4) (2026-03-02)
+
+
+### Fixed
+
+* **crash-reporter:** ignore SIGTERM restart exits ([9b7c5ee](https://github.com/dungle-scrubs/hisohiso/commit/9b7c5eece4c011e3a49fb83b4386c5636b90dc40))
+
+
+### Maintenance
+
+* **ci:** drop macOS build workflows ([#26](https://github.com/dungle-scrubs/hisohiso/issues/26)) ([3220be8](https://github.com/dungle-scrubs/hisohiso/commit/3220be81b8aeaca099e74390e05691bfdd9e397d))
+* **release:** automate homebrew tap formula updates ([#25](https://github.com/dungle-scrubs/hisohiso/issues/25)) ([4ea1208](https://github.com/dungle-scrubs/hisohiso/commit/4ea1208c8bde452d5bdec6b6e622bef321a7548d))
+* update formula for v0.2.3 ([#23](https://github.com/dungle-scrubs/hisohiso/issues/23)) ([273ad41](https://github.com/dungle-scrubs/hisohiso/commit/273ad4102a73358469942d301701b22f6ae72fd5))
+
 ## [0.2.3](https://github.com/dungle-scrubs/hisohiso/compare/v0.2.2...v0.2.3) (2026-02-26)
 
 
