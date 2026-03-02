@@ -6,7 +6,7 @@ import Darwin
 /// Captures crash signals, uncaught exceptions, and unexpected exits.
 ///
 /// ## How it works
-/// 1. **Signal handlers** (SIGTERM, SIGABRT, SIGSEGV, etc.) write a breadcrumb
+/// 1. **Signal handlers** (SIGABRT, SIGSEGV, etc.) write a breadcrumb
 ///    file synchronously using only async-signal-safe functions (no malloc, no ObjC).
 /// 2. **`atexit` handler** detects if the app exited without going through
 ///    `applicationWillTerminate` and logs the anomaly.
@@ -53,9 +53,13 @@ enum CrashReporter {
     /// read in `atexit` handler. Single-writer, signal-safe.
     private(set) nonisolated(unsafe) static var cleanShutdown = false
 
-    /// Signals we intercept.
+    /// Fatal signals we intercept.
+    ///
+    /// SIGTERM is intentionally excluded because launchd sends it for expected
+    /// lifecycle events (e.g. unload/reload), and treating it as a crash causes
+    /// noisy false-positive "recovered from a crash" notifications.
     private static let signals: [Int32] = [
-        SIGABRT, SIGBUS, SIGFPE, SIGILL, SIGSEGV, SIGTRAP, SIGTERM,
+        SIGABRT, SIGBUS, SIGFPE, SIGILL, SIGSEGV, SIGTRAP,
     ]
 
     // MARK: - Install
@@ -116,6 +120,14 @@ enum CrashReporter {
 
         // Empty breadcrumb = stale file, not a real crash
         guard !breadcrumb.isEmpty else {
+            return nil
+        }
+
+        // Backward compatibility: older builds treated SIGTERM as a crash.
+        // Ignore these breadcrumbs to avoid false-positive notifications when
+        // launchd intentionally restarts or reloads the job.
+        guard !breadcrumb.hasPrefix("SIGNAL: SIGTERM") else {
+            logInfo("Ignoring expected SIGTERM termination breadcrumb")
             return nil
         }
 
