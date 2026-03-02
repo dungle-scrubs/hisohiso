@@ -1,4 +1,4 @@
-.PHONY: build run test clean lint format setup xcode logs install-agent uninstall-agent agent-status crashes
+.PHONY: build run test clean lint format setup xcode logs app-bundle install-agent uninstall-agent agent-status crashes
 
 PLIST_NAME := com.hisohiso.app.plist
 PLIST_SRC  := Resources/$(PLIST_NAME)
@@ -11,6 +11,11 @@ build:
 # Build release
 release:
 	swift build -c release
+
+# Build unsigned .app bundle in dist/ (example: make app-bundle VERSION=0.2.4)
+app-bundle:
+	@test -n "$(VERSION)" || (echo "VERSION is required (e.g. make app-bundle VERSION=0.2.4)" && exit 1)
+	./scripts/build-app-bundle.sh "$(VERSION)" dist
 
 # Run the app
 run:

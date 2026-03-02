@@ -38,17 +38,32 @@ Hisohiso requests these permissions on first launch:
 
 ## Installation
 
-### Homebrew
+### Homebrew Cask (recommended)
 
 ```bash
-brew install dungle-scrubs/hisohiso/hisohiso
+brew install --cask dungle-scrubs/tap/hisohiso-app
+```
+
+Launch from Applications or with:
+
+```bash
+open -a Hisohiso
+```
+
+> **Note:** App bundle releases are currently ad-hoc signed (not notarized),
+> so macOS may require an initial manual "Open Anyway" approval.
+
+### Homebrew Formula (CLI build)
+
+```bash
+brew install dungle-scrubs/tap/hisohiso
 ```
 
 Then run `hisohiso` to launch.
 
 ### Download
 
-Grab the latest `.tar.gz` from
+Grab the latest `hisohiso-vX.Y.Z-darwin-arm64.zip` app bundle from
 [GitHub Releases](https://github.com/dungle-scrubs/hisohiso/releases).
 
 ### Build from source
