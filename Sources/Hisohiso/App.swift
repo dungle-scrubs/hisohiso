@@ -361,9 +361,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
 
-            // Forward audio levels to the floating pill
+            // Forward audio levels to the floating pill and any external waveform display
             controller.onAudioLevels = { [weak self] levels in
                 self?.floatingPill?.updateAudioLevels(levels)
+                WaveformBridge.shared.sendLevels(levels)
             }
         }
 
@@ -462,8 +463,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateFloatingPill(for state: RecordingState) {
         logInfo("updateFloatingPill called with state: \(state)")
 
-        // Show the pill when the user enabled it.
-        let showPill = AppPreferences.shared.showFloatingPill
+        // Re-check whether an external waveform display is listening (it may have
+        // started or stopped since the last state change).
+        WaveformBridge.shared.checkAvailability()
+
+        // Show the pill when the user enabled it, or as a fallback when no external
+        // waveform display is connected.
+        let showPill = AppPreferences.shared.showFloatingPill || !WaveformBridge.shared.isAvailable
 
         // Always show the pill for errors so the message is visible.
         let isError = if case .error = state { true } else { false }

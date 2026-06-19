@@ -28,6 +28,7 @@ final class DictationController: ObservableObject {
     private let modelManager: ModelManager
     private let hotkeyManager: HotkeyManager?
     private let historyStore = HistoryStore.shared
+    private let waveformBridge = WaveformBridge.shared
 
     @Published private(set) var stateManager = RecordingStateManager()
 
@@ -274,6 +275,8 @@ final class DictationController: ObservableObject {
                 "Using \(useAudioKit ? "AudioKit" : "AVAudioEngine") recorder\(fromWakeWord ? " (wake word triggered, auto-stop enabled)" : "")"
             )
 
+            waveformBridge.sendState(.recording)
+
             // Start audio level updates for the floating waveform
             startAudioLevelUpdates()
 
@@ -283,6 +286,7 @@ final class DictationController: ObservableObject {
             logError("Failed to start recording: \(error)")
             mediaPlaybackCoordinator.resumeAfterRecording()
             stateManager.setError("Failed to start recording")
+            waveformBridge.sendState(.error(message: "Failed to start"))
         }
     }
 
@@ -298,6 +302,7 @@ final class DictationController: ObservableObject {
         mediaPlaybackCoordinator.resumeAfterRecording()
 
         stateManager.setIdle()
+        waveformBridge.sendState(.idle)
     }
 
     private func startEscapeMonitor() {
@@ -365,6 +370,8 @@ final class DictationController: ObservableObject {
         let audioSamples = activeRecorder.stopRecording()
         mediaPlaybackCoordinator.resumeAfterRecording()
 
+        waveformBridge.sendState(.transcribing)
+
         // Calculate recording duration.
         let duration: TimeInterval = if let startTime = recordingStartTime {
             Date().timeIntervalSince(startTime)
@@ -406,17 +413,20 @@ final class DictationController: ObservableObject {
             logError("Transcription error: \(error)")
             switch error {
             case .timeout:
+                waveformBridge.sendState(.error(message: "Timed out"))
                 stateManager.setError("Transcription timed out")
                 return .failure(.transcriptionFailed("Transcription timed out"))
             case .invalidAudioData:
                 logInfo("Audio too short for transcription")
                 return finalizationCoordinator().failIdle(.audioTooShort)
             default:
+                waveformBridge.sendState(.error(message: error.localizedDescription))
                 stateManager.setError(error.localizedDescription)
                 return .failure(.transcriptionFailed(error.localizedDescription))
             }
         } catch {
             logError("Error during transcription: \(error)")
+            waveformBridge.sendState(.error(message: error.localizedDescription))
             stateManager.setError(error.localizedDescription)
             return .failure(.transcriptionFailed(error.localizedDescription))
         }
@@ -453,6 +463,7 @@ final class DictationController: ObservableObject {
             textFormatter: textFormatter,
             setIdle: { [stateManager] in stateManager.setIdle() },
             setError: { [stateManager] message in stateManager.setError(message) },
+            sendState: { [waveformBridge] state in waveformBridge.sendState(state) },
             saveHistory: { [historyStore] text, duration, modelName in
                 historyStore.save(text: text, duration: duration, modelName: modelName)
             },

@@ -10,11 +10,13 @@ struct DictationFinalizationCoordinator {
     var textFormatter: TextFormatter
     var setIdle: () -> Void
     var setError: (String) -> Void
+    var sendState: (RecordingState) -> Void
     var saveHistory: (_ text: String, _ duration: TimeInterval, _ modelName: String) -> Void
     var insertText: (String) throws -> Void
 
     func failIdle(_ error: ControlledTranscriptionError) -> Result<String, ControlledTranscriptionError> {
         setIdle()
+        sendState(.idle)
         return .failure(error)
     }
 
@@ -38,12 +40,14 @@ struct DictationFinalizationCoordinator {
                 try insertText(formattedText)
             } catch {
                 logError("Failed to insert text at cursor: \(error)")
+                sendState(.error(message: error.localizedDescription))
                 setError(error.localizedDescription)
                 return .failure(.textInsertionFailed(error.localizedDescription))
             }
         }
 
         setIdle()
+        sendState(.idle)
         return .success(formattedText)
     }
 }

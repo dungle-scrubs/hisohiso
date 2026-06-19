@@ -12,6 +12,7 @@ final class DictationFinalizationCoordinatorTests: XCTestCase {
         XCTAssertEqual(recorder.insertedText, ["Hello world"])
         XCTAssertEqual(recorder.savedText, ["Hello world"])
         XCTAssertEqual(recorder.idleCount, 1)
+        XCTAssertEqual(recorder.sentStates, [.idle])
     }
 
     func testEmptyAudioFailureIdlesOnce() {
@@ -25,6 +26,7 @@ final class DictationFinalizationCoordinatorTests: XCTestCase {
             return
         }
         XCTAssertEqual(recorder.idleCount, 1)
+        XCTAssertEqual(recorder.sentStates, [.idle])
     }
 
     func testVoiceVerificationFailureIdlesOnce() {
@@ -38,6 +40,7 @@ final class DictationFinalizationCoordinatorTests: XCTestCase {
             return
         }
         XCTAssertEqual(recorder.idleCount, 1)
+        XCTAssertEqual(recorder.sentStates, [.idle])
     }
 
     func testInsertionFailureSetsErrorWithoutIdle() {
@@ -52,6 +55,7 @@ final class DictationFinalizationCoordinatorTests: XCTestCase {
         }
         XCTAssertEqual(recorder.idleCount, 0)
         XCTAssertEqual(recorder.errorMessages, ["Insert failed"])
+        XCTAssertEqual(recorder.sentStates, [.error(message: "Insert failed")])
     }
 
     func testExternalOutputModeDoesNotInsertText() throws {
@@ -71,6 +75,7 @@ final class DictationFinalizationCoordinatorTests: XCTestCase {
             let recorder = FinalizationRecorder()
             _ = recorder.makeCoordinator().failIdle(error)
             XCTAssertEqual(recorder.idleCount, 1)
+            XCTAssertEqual(recorder.sentStates, [.idle])
         }
     }
 }
@@ -78,6 +83,7 @@ final class DictationFinalizationCoordinatorTests: XCTestCase {
 private final class FinalizationRecorder {
     var idleCount = 0
     var errorMessages: [String] = []
+    var sentStates: [RecordingState] = []
     var savedText: [String] = []
     var insertedText: [String] = []
     let insertError: Error?
@@ -91,6 +97,7 @@ private final class FinalizationRecorder {
             textFormatter: TextFormatter(),
             setIdle: { self.idleCount += 1 },
             setError: { self.errorMessages.append($0) },
+            sendState: { self.sentStates.append($0) },
             saveHistory: { text, _, _ in self.savedText.append(text) },
             insertText: { text in
                 if let insertError = self.insertError { throw insertError }
