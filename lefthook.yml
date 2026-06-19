@@ -1,0 +1,23 @@
+# Git hooks managed by lefthook (https://lefthook.dev).
+# Installed by `make setup`, or directly with: lefthook install
+#
+# All checks run locally — there are no build steps in CI.
+#   pre-commit: format → lint → type-check (runs in order, stops on first failure)
+#   pre-push:   verified-secret scan
+pre-commit:
+  piped: true
+  commands:
+    format:
+      glob: "*.swift"
+      run: swiftformat --config .swiftformat {staged_files}
+      stage_fixed: true
+    lint:
+      glob: "*.swift"
+      run: swiftlint lint --strict --config .swiftlint.yml {staged_files}
+    typecheck:
+      run: swift build
+
+pre-push:
+  commands:
+    secrets:
+      run: scripts/trufflehog-pre-push.sh

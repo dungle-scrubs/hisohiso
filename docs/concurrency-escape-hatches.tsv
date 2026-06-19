@@ -1,0 +1,23 @@
+path	kind	symbol	classification	rationale
+Sources/Hisohiso/AudioKitRecorder.swift	unchecked-sendable	AudioKitRecorder	narrow	Audio callback bridge; buffer has explicit lock, lifecycle state should move behind one synchronization strategy in M7.
+Sources/Hisohiso/AudioRecorder.swift	unchecked-sendable	AudioRecorder	narrow	Audio render callback bridge; lifecycle and sample state moved to AudioRecorderStateStore in M7, remaining unchecked scope exists for AVAudioEngine callback ownership.
+Sources/Hisohiso/AudioRecorderStateStore.swift	unchecked-sendable	AudioRecorderStateStore	justified	Single-purpose state container protects lifecycle and sample buffer with NSLock and exposes only short lock-scoped operations.
+Sources/Hisohiso/CloudProviders/CloudProvider.swift	unchecked-sendable	BaseCloudProvider	justified	Immutable provider configuration wraps URLSession and Keychain calls; subclasses only supply static endpoint/model metadata.
+Sources/Hisohiso/CloudProviders/GroqProvider.swift	unchecked-sendable	GroqProvider	justified	Immutable BaseCloudProvider specialization with no additional mutable state.
+Sources/Hisohiso/CloudProviders/OpenAIProvider.swift	unchecked-sendable	OpenAIProvider	justified	Immutable BaseCloudProvider specialization with no additional mutable state.
+Sources/Hisohiso/ControlServer.swift	unchecked-sendable	ControlServer	narrow	Unix-socket transport crosses Dispatch queues; queue-isolated mutable state should be documented or wrapped in a smaller adapter.
+Sources/Hisohiso/CrashArchiveStore.swift	unchecked-sendable	CrashArchiveStore	justified	Immutable value used from crash startup paths; injected dependencies do not mutate instance state.
+Sources/Hisohiso/CrashReporter.swift	nonisolated-unsafe	breadcrumbFD	justified	Signal handlers cannot use actors or locks; descriptor is process-global and written with async-signal-safe calls.
+Sources/Hisohiso/CrashReporter.swift	nonisolated-unsafe	cleanShutdown	justified	atexit handler cannot hop actors; single flag differentiates clean app termination from dirty exit.
+Sources/Hisohiso/EventTapManager.swift	unchecked-sendable	EventTapManager	narrow	CGEventTap callback crosses arbitrary threads; mutable handler registry moved to EventTapRegistry in M7, remaining tap lifecycle state still crosses callback boundaries.
+Sources/Hisohiso/EventTapRegistry.swift	unchecked-sendable	EventTapRegistry	justified	Single-purpose registry protects mutable handler list with OSAllocatedUnfairLock and exposes snapshot dispatch only.
+Sources/Hisohiso/HistoryHotkeyMonitor.swift	unchecked-sendable	HistoryHotkeyMonitor	narrow	CGEventTap handler must synchronously read hotkey state from a Sendable callback; hotkey state should move behind the same lock-backed pattern as HotkeyManager.
+Sources/Hisohiso/KeychainManager.swift	unchecked-sendable	KeychainManager	justified	Stateless wrapper around Security framework SecItem calls, which own synchronization.
+Sources/Hisohiso/Logger.swift	unchecked-sendable	Logger	justified	Serial queue owns mutable file handle access and crash paths require cross-thread logging.
+Sources/Hisohiso/SinewBridge.swift	unchecked-sendable	SinewBridge	narrow	Serial queue owns socket I/O; connection metadata moved to SinewConnectionStateStore in M8, remaining unchecked scope exists for async socket queue ownership.
+Sources/Hisohiso/Transcriber.swift	nonisolated-unsafe	asrManager	narrow	FluidAudio manager is actor-owned but its async inference API is nonisolated; boxed call sites limit the escape while preserving timeout behavior.
+Sources/Hisohiso/Transcriber.swift	nonisolated-unsafe	whisperKit	narrow	WhisperKit model is actor-owned but its async inference API is nonisolated; boxed call sites limit the escape while preserving timeout behavior.
+Sources/Hisohiso/UncheckedSendableBox.swift	unchecked-sendable	UncheckedSendableBox	narrow	Small call-site wrapper for third-party model objects whose async APIs are nonisolated; use only around existing actor-owned inference references.
+Sources/Hisohiso/VoiceVerifier.swift	unchecked-sendable	VoiceVerifier	narrow	Heavy CoreML/DSP object crosses async boundaries; mutable model/enrollment state needs explicit isolation after inventory.
+Sources/Hisohiso/WakeWordManager.swift	nonisolated-unsafe	whisperKit	narrow	Only remaining wake-word actor escape; VAD/listening buffers moved to WakeWordStateStore in M8, while WhisperKit ownership still crosses nonisolated inference API.
+Sources/Hisohiso/WakeWordStateStore.swift	unchecked-sendable	WakeWordStateStore	justified	Single-purpose audio-thread state container protects listening, VAD, and buffers with NSLock and exposes lock-scoped operations.

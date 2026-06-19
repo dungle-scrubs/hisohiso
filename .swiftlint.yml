@@ -1,0 +1,50 @@
+disabled_rules:
+  - trailing_whitespace
+  - line_length
+  - trailing_comma
+  - opening_brace
+  - statement_position
+
+opt_in_rules:
+  - empty_count
+  - explicit_init
+  - closure_spacing
+  - overridden_super_call
+  - redundant_nil_coalescing
+  - private_outlet
+  - attributes
+  - closure_end_indentation
+  - first_where
+  - fatal_error_message
+
+excluded:
+  - .build
+  - Package.swift
+
+# Allow short names common in DSP, math, UI layout, and loop variables
+identifier_name:
+  min_length: 1
+  max_length: 60
+  allowed_symbols: ["_"]
+
+# AppKit UI code uses long bodies for layout. New findings fail through
+# scripts/check-lint-baseline.sh; only the documented HistoryPaletteWindow
+# function-body warning is temporarily grandfathered.
+function_body_length: 90
+type_body_length: 500
+file_length: 600
+cyclomatic_complexity: 27
+
+large_tuple:
+  warning: 3
+  error: 4
+
+# NSView/NSWindow @objc callbacks require attributes on same line
+attributes:
+  always_on_same_line:
+    - "@objc"
+    - "@IBAction"
+    - "@IBOutlet"
+    - "@NSManaged"
+  always_on_line_above:
+    - "@discardableResult"

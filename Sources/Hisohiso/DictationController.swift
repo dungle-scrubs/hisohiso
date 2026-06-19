@@ -1,0 +1,600 @@
+import Cocoa
+import Combine
+import Foundation
+
+/// Coordinates the dictation flow: Globe key → recording → transcription → text insertion
+@MainActor
+final class DictationController: ObservableObject {
+    private let globeMonitor = GlobeKeyMonitor()
+    let audioRecorder = AudioRecorder()
+    private let audioKitRecorder = AudioKitRecorder()
+    private let transcriber = Transcriber()
+
+    /// Whether to use AudioKit for recording (with noise handling)
+    var useAudioKit: Bool {
+        get { UserDefaults.standard.bool(for: .useAudioKit) }
+        set { UserDefaults.standard.set(newValue, for: .useAudioKit) }
+    }
+
+    /// The active recorder, selected by the `useAudioKit` preference.
+    private var activeRecorder: AudioRecording {
+        useAudioKit ? audioKitRecorder : audioRecorder
+    }
+
+    private let textInserter = TextInserter()
+    private let textFormatter = TextFormatter()
+    private let audioFeedback = AudioFeedback()
+    private let mediaPlaybackCoordinator: MediaPlaybackCoordinator
+    private let modelManager: ModelManager
+    private let hotkeyManager: HotkeyManager?
+    private let historyStore = HistoryStore.shared
+
+    @Published private(set) var stateManager = RecordingStateManager()
+
+    /// Track recording start time for duration calculation
+    private var recordingStartTime: Date?
+
+    private lazy var audioLevelPublisher = AudioLevelPublisher(
+        sampleProvider: { [weak self] in self?.activeRecorder.getRecentSamples(count: 1600) ?? [] },
+        levelSink: { [weak self] levels in self?.onAudioLevels?(levels) },
+        autoStop: { [weak self] in
+            Task { @MainActor [weak self] in await self?.stopRecordingAndTranscribe() }
+        }
+    )
+
+    /// Callback for audio level updates (for UI waveform)
+    var onAudioLevels: (([UInt8]) -> Void)?
+
+    /// Monitor for escape key to cancel recording
+    private var escapeMonitor: Any?
+
+    /// Whether current recording was triggered by wake word (auto-stop on silence)
+    private var isWakeWordTriggered = false
+
+    private var isInitialized = false
+
+    init(
+        modelManager: ModelManager,
+        hotkeyManager: HotkeyManager? = nil,
+        mediaPlaybackCoordinator: MediaPlaybackCoordinator = MediaPlaybackCoordinator()
+    ) {
+        self.modelManager = modelManager
+        self.hotkeyManager = hotkeyManager
+        self.mediaPlaybackCoordinator = mediaPlaybackCoordinator
+        setupCallbacks()
+    }
+
+    var recordingState: RecordingState {
+        stateManager.state
+    }
+
+    var isIdle: Bool {
+        stateManager.isIdle
+    }
+
+    var isRecording: Bool {
+        stateManager.isRecording
+    }
+
+    var isModelReloadAllowed: Bool {
+        stateManager.isIdle
+    }
+
+    func observeRecordingState(_ handler: @escaping (RecordingState) -> Void) -> AnyCancellable {
+        stateManager.$state
+            .receive(on: DispatchQueue.main)
+            .sink(receiveValue: handler)
+    }
+
+    func setInputDevice(_ device: AudioInputDevice) {
+        audioRecorder.setInputDevice(device)
+    }
+
+    func currentInputDevice() -> AudioInputDevice {
+        audioRecorder.currentDevice()
+    }
+
+    func setMonitoringSamplesHandler(_ handler: @escaping (_ samples: [Float], _ sampleRate: Double) -> Void) {
+        audioRecorder.onMonitoringSamples = handler
+    }
+
+    func startWakeWordMonitoring() throws {
+        try audioRecorder.startMonitoring()
+    }
+
+    func stopWakeWordMonitoring() {
+        audioRecorder.stopMonitoring()
+    }
+
+    func pauseWakeWordMonitoring() {
+        audioRecorder.pauseMonitoring()
+    }
+
+    func resumeWakeWordMonitoring() {
+        audioRecorder.resumeMonitoring()
+    }
+
+    func dismissCurrentState() {
+        stateManager.setIdle()
+    }
+
+    func retryCurrentState() {
+        stateManager.retry()
+    }
+
+    /// Initialize the controller and start monitoring
+    func initialize() async throws {
+        guard !isInitialized else { return }
+
+        logInfo("Initializing DictationController...")
+
+        // Request microphone permission
+        let hasMicPermission = await AudioRecorder.requestPermission()
+        if !hasMicPermission {
+            throw DictationError.microphonePermissionDenied
+        }
+
+        // Check accessibility permission - but don't block on it
+        // The event tap creation will fail if we truly don't have permission
+        let hasAccessibility = GlobeKeyMonitor.checkAccessibilityPermission(prompt: true)
+        logInfo("Accessibility permission check: \(hasAccessibility) (will try event tap anyway)")
+
+        // Initialize transcriber with selected model
+        try await transcriber.initialize(model: modelManager.selectedModel)
+
+        // Start Globe key monitoring
+        guard globeMonitor.start() else {
+            throw DictationError.eventTapFailed
+        }
+
+        // Start alternative hotkey monitoring (if configured)
+        hotkeyManager?.start()
+
+        isInitialized = true
+        logInfo("DictationController initialized")
+    }
+
+    /// Stop the controller
+    func shutdown() {
+        globeMonitor.stop()
+        hotkeyManager?.stop()
+        stopEscapeMonitor()
+        if stateManager.isRecording {
+            activeRecorder.cancelRecording()
+            mediaPlaybackCoordinator.resumeAfterRecording()
+        }
+        stateManager.setIdle()
+        logInfo("DictationController shutdown")
+    }
+
+    private func setupCallbacks() {
+        logInfo("Setting up callbacks...")
+
+        // Tap: toggle recording on/off
+        globeMonitor.onGlobeTap = { [weak self] in
+            guard let self else {
+                logWarning("onGlobeTap: self is nil")
+                return
+            }
+            logInfo("Globe tap received, calling toggleRecording")
+            Task { await self.toggleRecording() }
+        }
+
+        // Hold: start recording, or stop if already recording from tap
+        globeMonitor.onGlobeHoldStart = { [weak self] in
+            guard let self else {
+                logWarning("onGlobeHoldStart: self is nil")
+                return
+            }
+            logInfo("Globe hold start received")
+            // If already recording (from a tap), stop immediately
+            if stateManager.isRecording {
+                logInfo("Hold started while recording - stopping immediately")
+                Task { await self.stopRecordingAndTranscribe() }
+                return
+            }
+            Task { await self.startRecording() }
+        }
+
+        // Release after hold: stop recording (only if still recording)
+        globeMonitor.onGlobeHoldEnd = { [weak self] in
+            guard let self else {
+                logWarning("onGlobeHoldEnd: self is nil")
+                return
+            }
+            // Only stop if still recording (might have been stopped by hold-start)
+            guard stateManager.isRecording else { return }
+            Task { await self.stopRecordingAndTranscribe() }
+        }
+
+        // Alternative hotkey: hold to record
+        hotkeyManager?.onHotkeyDown = { [weak self] in
+            guard let self else { return }
+            Task { await self.startRecording() }
+        }
+
+        hotkeyManager?.onHotkeyUp = { [weak self] in
+            guard let self else { return }
+            Task { await self.stopRecordingAndTranscribe() }
+        }
+
+        // Handle retry from error state
+        stateManager.onRetry = { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.stateManager.setIdle()
+            }
+        }
+    }
+
+    private func toggleRecording() async {
+        logInfo("toggleRecording called (state: \(stateManager.state))")
+        if stateManager.isIdle {
+            logInfo("State is idle, starting recording")
+            await startRecording()
+        } else if stateManager.isRecording {
+            await stopRecordingAndTranscribe()
+        }
+        // Ignore if transcribing or in error state
+    }
+
+    /// Reinitialize the transcriber with the currently selected model.
+    /// - Throws: `DictationError.cannotChangeModelWhileBusy` if not idle.
+    func reloadSelectedModel() async throws {
+        guard stateManager.isIdle else {
+            throw DictationError.cannotChangeModelWhileBusy
+        }
+
+        let selectedModel = modelManager.selectedModel
+        try await transcriber.initialize(model: selectedModel)
+        logInfo("Transcriber model reloaded: \(selectedModel.rawValue)")
+    }
+
+    /// Start audio recording.
+    /// - Parameter fromWakeWord: If `true`, recording auto-stops after detecting silence.
+    func startRecording(fromWakeWord: Bool = false) async {
+        logInfo("startRecording called (fromWakeWord: \(fromWakeWord), currentState: \(stateManager.state))")
+
+        guard stateManager.isIdle else {
+            logWarning("Cannot start recording: not in idle state (state: \(stateManager.state))")
+            return
+        }
+
+        // Track if this was triggered by wake word for auto-stop
+        isWakeWordTriggered = fromWakeWord
+
+        // Set state FIRST so release callback knows we're recording
+        stateManager.setRecording()
+        await mediaPlaybackCoordinator.pauseForRecording()
+        audioFeedback.playStart()
+        recordingStartTime = Date()
+
+        do {
+            try activeRecorder.startRecording()
+            logInfo(
+                "Using \(useAudioKit ? "AudioKit" : "AVAudioEngine") recorder\(fromWakeWord ? " (wake word triggered, auto-stop enabled)" : "")"
+            )
+
+            // Start audio level updates for the floating waveform
+            startAudioLevelUpdates()
+
+            // Start escape key monitor to cancel recording
+            startEscapeMonitor()
+        } catch {
+            logError("Failed to start recording: \(error)")
+            mediaPlaybackCoordinator.resumeAfterRecording()
+            stateManager.setError("Failed to start recording")
+        }
+    }
+
+    /// Cancel recording without transcribing
+    private func cancelRecording() {
+        guard stateManager.isRecording else { return }
+
+        logInfo("Recording cancelled by user")
+        stopEscapeMonitor()
+        stopAudioLevelUpdates()
+
+        activeRecorder.cancelRecording()
+        mediaPlaybackCoordinator.resumeAfterRecording()
+
+        stateManager.setIdle()
+    }
+
+    private func startEscapeMonitor() {
+        // Use global monitor since we're a menu bar app without a key window
+        escapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == AppConstants.escapeKeyCode {
+                logInfo("Escape pressed - cancelling recording")
+                Task { @MainActor [weak self] in
+                    self?.cancelRecording()
+                }
+            }
+        }
+        logDebug("Escape monitor started")
+    }
+
+    private func stopEscapeMonitor() {
+        if let monitor = escapeMonitor {
+            NSEvent.removeMonitor(monitor)
+            escapeMonitor = nil
+            logDebug("Escape monitor stopped")
+        }
+    }
+
+    private func startAudioLevelUpdates() {
+        audioLevelPublisher.start(isWakeWordTriggered: isWakeWordTriggered)
+    }
+
+    private func stopAudioLevelUpdates() {
+        audioLevelPublisher.stop()
+    }
+
+    /// Stop recording, transcribe the captured audio, and insert the result at the cursor.
+    func stopRecordingAndTranscribe() async {
+        _ = await stopRecordingAndTranscribe(mode: .insertAtCursor)
+    }
+
+    /// Stop recording and return the transcription text for external controllers.
+    /// - Returns: Formatted transcription text or a control error.
+    func stopRecordingForExternalControl() async -> Result<String, ControlledTranscriptionError> {
+        await stopRecordingAndTranscribe(mode: .returnTextOnly)
+    }
+
+    /// Cancel recording from an external control command.
+    func cancelRecordingForExternalControl() {
+        cancelRecording()
+    }
+
+    /// Shared recording stop/transcription flow used by both UI and external control.
+    /// - Parameter mode: Output behavior after transcription.
+    /// - Returns: Formatted text or a typed control error.
+    private func stopRecordingAndTranscribe(
+        mode: TranscriptionOutputMode
+    ) async -> Result<String, ControlledTranscriptionError> {
+        guard stateManager.isRecording else {
+            logWarning("Cannot stop recording: not recording")
+            return .failure(.notRecording)
+        }
+
+        stopAudioLevelUpdates()
+        // Send zero levels to clear the waveform before the stop sound plays.
+        audioLevelPublisher.clearLevels()
+        stopEscapeMonitor()
+        audioFeedback.playStop()
+
+        let audioSamples = activeRecorder.stopRecording()
+        mediaPlaybackCoordinator.resumeAfterRecording()
+
+        // Calculate recording duration.
+        let duration: TimeInterval = if let startTime = recordingStartTime {
+            Date().timeIntervalSince(startTime)
+        } else {
+            Double(audioSamples.count) / AppConstants.targetSampleRate
+        }
+        recordingStartTime = nil
+
+        guard !audioSamples.isEmpty else {
+            logWarning("No audio captured")
+            return finalizationCoordinator().failIdle(.noAudioCaptured)
+        }
+
+        // Minimum audio length check — Parakeet needs at least 1 second.
+        guard audioSamples.count >= AppConstants.minTranscriptionSamples else {
+            logInfo(
+                "Audio too short (\(audioSamples.count) samples, need \(AppConstants.minTranscriptionSamples)), ignoring"
+            )
+            return finalizationCoordinator().failIdle(.audioTooShort)
+        }
+
+        stateManager.setTranscribing()
+
+        #if DEBUG
+        saveDebugAudio(audioSamples)
+        #endif
+
+        switch await verifyVoiceIfNeeded(audioSamples: audioSamples) {
+        case .success:
+            break
+        case let .failure(error):
+            return finalizationCoordinator().failIdle(error)
+        }
+
+        do {
+            let rawText = try await transcriber.transcribe(audioSamples)
+            return finishSuccessfulTranscription(rawText: rawText, duration: duration, mode: mode)
+        } catch let error as TranscriberError {
+            logError("Transcription error: \(error)")
+            switch error {
+            case .timeout:
+                stateManager.setError("Transcription timed out")
+                return .failure(.transcriptionFailed("Transcription timed out"))
+            case .invalidAudioData:
+                logInfo("Audio too short for transcription")
+                return finalizationCoordinator().failIdle(.audioTooShort)
+            default:
+                stateManager.setError(error.localizedDescription)
+                return .failure(.transcriptionFailed(error.localizedDescription))
+            }
+        } catch {
+            logError("Error during transcription: \(error)")
+            stateManager.setError(error.localizedDescription)
+            return .failure(.transcriptionFailed(error.localizedDescription))
+        }
+    }
+
+    /// Perform optional speaker verification before transcription.
+    /// - Parameter audioSamples: Captured microphone audio.
+    /// - Returns: Success when verification passes or is disabled.
+    private func verifyVoiceIfNeeded(audioSamples: [Float]) async -> Result<Void, ControlledTranscriptionError> {
+        guard VoiceVerifier.shared.isEnabled, VoiceVerifier.shared.isEnrolled else {
+            return .success(())
+        }
+
+        do {
+            let verificationResult = try await VoiceVerifier.shared.verify(audioSamples: audioSamples)
+            if !verificationResult.isMatch {
+                logInfo(
+                    "Voice verification failed (similarity: \(String(format: "%.2f", verificationResult.similarity)))"
+                )
+                return .failure(.voiceVerificationFailed)
+            }
+
+            logDebug("Voice verified (similarity: \(String(format: "%.2f", verificationResult.similarity)))")
+            return .success(())
+        } catch {
+            // If verification fails, log but continue with transcription.
+            logWarning("Voice verification error: \(error.localizedDescription)")
+            return .success(())
+        }
+    }
+
+    private func finalizationCoordinator() -> DictationFinalizationCoordinator {
+        DictationFinalizationCoordinator(
+            textFormatter: textFormatter,
+            setIdle: { [stateManager] in stateManager.setIdle() },
+            setError: { [stateManager] message in stateManager.setError(message) },
+            saveHistory: { [historyStore] text, duration, modelName in
+                historyStore.save(text: text, duration: duration, modelName: modelName)
+            },
+            insertText: { [textInserter] text in try textInserter.insert(text) }
+        )
+    }
+
+    /// Persist and emit a successful transcription.
+    /// - Parameters:
+    ///   - rawText: Raw text from the speech model.
+    ///   - duration: Recording duration in seconds.
+    ///   - mode: Output behavior after formatting.
+    /// - Returns: Formatted transcription text.
+    private func finishSuccessfulTranscription(
+        rawText: String,
+        duration: TimeInterval,
+        mode: TranscriptionOutputMode
+    ) -> Result<String, ControlledTranscriptionError> {
+        finalizationCoordinator().finishSuccess(
+            rawText: rawText,
+            duration: duration,
+            mode: mode,
+            modelName: modelManager.selectedModel.displayName
+        )
+    }
+
+    #if DEBUG
+    /// Save audio samples to file for debugging, pruning old files.
+    private func saveDebugAudio(_ samples: [Float]) {
+        let debugDir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("hisohiso-debug")
+        try? FileManager.default.createDirectory(at: debugDir, withIntermediateDirectories: true)
+
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+        let path = debugDir.appendingPathComponent("\(timestamp).raw")
+
+        let data = samples.withUnsafeBufferPointer { buffer in
+            Data(buffer: buffer)
+        }
+
+        do {
+            try data.write(to: path)
+            logInfo("Debug audio saved to \(path.path) (\(samples.count) samples)")
+            pruneDebugAudio(in: debugDir)
+        } catch {
+            logError("Failed to save debug audio: \(error)")
+        }
+    }
+
+    /// Keep only the most recent debug audio files.
+    private func pruneDebugAudio(in directory: URL) {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey])
+            .sorted(by: { ($0.lastPathComponent) > ($1.lastPathComponent) })
+        else { return }
+
+        for file in files.dropFirst(AppConstants.maxDebugAudioFiles) {
+            try? fm.removeItem(at: file)
+        }
+    }
+    #endif
+}
+
+extension DictationController: ModelReloading {}
+
+extension DictationController: DictationControlHandling {
+    var controlRecordingState: RecordingState {
+        recordingState
+    }
+
+    var isControlIdle: Bool {
+        isIdle
+    }
+
+    var isControlRecording: Bool {
+        isRecording
+    }
+
+    func startControlRecording() async {
+        await startRecording()
+    }
+
+    func stopControlRecording() async -> Result<String, ControlledTranscriptionError> {
+        await stopRecordingForExternalControl()
+    }
+
+    func cancelControlRecording() {
+        cancelRecordingForExternalControl()
+    }
+}
+
+// MARK: - Errors
+
+enum DictationError: Error, Equatable, LocalizedError {
+    case microphonePermissionDenied
+    case accessibilityPermissionDenied
+    case eventTapFailed
+    case notInitialized
+    case cannotChangeModelWhileBusy
+
+    var errorDescription: String? {
+        switch self {
+        case .microphonePermissionDenied:
+            "Microphone permission denied. Please grant access in System Settings → Privacy & Security → Microphone."
+        case .accessibilityPermissionDenied:
+            "Accessibility permission denied. Please grant access in System Settings → Privacy & Security → Accessibility."
+        case .eventTapFailed:
+            "Failed to create event tap for Globe key. Please check Accessibility permissions."
+        case .notInitialized:
+            "Dictation controller not initialized"
+        case .cannotChangeModelWhileBusy:
+            "Stop recording/transcribing before changing transcription model."
+        }
+    }
+}
+
+/// Error type for external-control stop/cancel/start workflows.
+enum ControlledTranscriptionError: Error, LocalizedError {
+    case notRecording
+    case noAudioCaptured
+    case audioTooShort
+    case emptyTranscription
+    case voiceVerificationFailed
+    case textInsertionFailed(String)
+    case transcriptionFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .notRecording:
+            "Not currently recording"
+        case .noAudioCaptured:
+            "No audio captured"
+        case .audioTooShort:
+            "Audio too short for transcription"
+        case .emptyTranscription:
+            "No transcription produced"
+        case .voiceVerificationFailed:
+            "Voice verification failed"
+        case let .textInsertionFailed(message):
+            "Text insertion failed: \(message)"
+        case let .transcriptionFailed(message):
+            "Transcription failed: \(message)"
+        }
+    }
+}
