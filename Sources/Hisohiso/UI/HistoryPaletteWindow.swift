@@ -1,0 +1,494 @@
+import AppKit
+import Carbon.HIToolbox
+
+// MARK: - HistoryPaletteWindow
+
+/// Spotlight-style command palette for browsing transcription history
+final class HistoryPaletteWindow: NSPanel {
+    private let searchField = NSTextField()
+    private let searchIcon = NSImageView()
+    private let scrollView = NSScrollView()
+    private let tableView = PointerTableView()
+    private let emptyLabel = NSTextField(labelWithString: "")
+    private let footerLabel = NSTextField(labelWithString: "")
+
+    private var records: [TranscriptionRecord] = []
+    private var filteredRecords: [TranscriptionRecord] = []
+    private var selectedIndex: Int = 0
+    private var localKeyMonitor: Any?
+    private var localClickMonitor: Any?
+    private var globalClickMonitor: Any?
+    private var mouseMovedMonitor: Any?
+
+    /// Callback when user selects a record
+    var onSelect: ((TranscriptionRecord) -> Void)?
+
+    /// Callback when window is dismissed
+    var onDismiss: (() -> Void)?
+
+    convenience init() {
+        self.init(
+            contentRect: NSRect(x: 0, y: 0, width: 580, height: 420),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+    }
+
+    override init(
+        contentRect: NSRect,
+        styleMask style: NSWindow.StyleMask,
+        backing backingStoreType: NSWindow.BackingStoreType,
+        defer flag: Bool
+    ) {
+        super.init(
+            contentRect: contentRect,
+            styleMask: style,
+            backing: backingStoreType,
+            defer: flag
+        )
+
+        setupWindow()
+        setupViews()
+    }
+
+    private func setupWindow() {
+        isOpaque = false
+        backgroundColor = .clear
+        level = .popUpMenu
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        isMovableByWindowBackground = false
+        hidesOnDeactivate = false
+        hasShadow = true
+        acceptsMouseMovedEvents = true
+
+        // Critical for NSPanel to accept key input
+        becomesKeyOnlyIfNeeded = false
+    }
+
+    /// Allow panel to become key window
+    override var canBecomeKey: Bool {
+        true
+    }
+
+    override var canBecomeMain: Bool {
+        true
+    }
+
+    private func setupViews() {
+        let width: CGFloat = 580
+        let height: CGFloat = 420
+
+        // Vibrancy background — frosted glass like Spotlight
+        let vibrancy = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        vibrancy.material = .hudWindow
+        vibrancy.blendingMode = .behindWindow
+        vibrancy.state = .active
+        vibrancy.wantsLayer = true
+        vibrancy.layer?.cornerRadius = 12
+        vibrancy.layer?.masksToBounds = true
+        vibrancy.layer?.borderColor = NSColor(white: 1.0, alpha: 0.08).cgColor
+        vibrancy.layer?.borderWidth = 0.5
+        contentView = vibrancy
+
+        // Search row container — use Auto Layout for vertical centering
+        let searchRow = NSView(frame: NSRect(x: 0, y: height - 48, width: width, height: 48))
+        vibrancy.addSubview(searchRow)
+
+        // Search icon — centered vertically via constraints
+        if let img = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: "Search") {
+            let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
+            searchIcon.image = img.withSymbolConfiguration(config)
+            searchIcon.contentTintColor = NSColor(white: 0.5, alpha: 1.0)
+        }
+        searchIcon.translatesAutoresizingMaskIntoConstraints = false
+        searchRow.addSubview(searchIcon)
+
+        // Search field — centered vertically via constraints
+        searchField.placeholderString = "Search history..."
+        searchField.font = .systemFont(ofSize: 16, weight: .regular)
+        searchField.isBordered = false
+        searchField.focusRingType = .none
+        searchField.drawsBackground = false
+        searchField.textColor = .white
+        searchField.delegate = self
+        searchField.target = self
+        searchField.action = #selector(searchFieldAction)
+
+        let placeholderAttrs: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor(white: 0.45, alpha: 1.0),
+            .font: NSFont.systemFont(ofSize: 16, weight: .regular),
+        ]
+        searchField.placeholderAttributedString = NSAttributedString(
+            string: "Search history...",
+            attributes: placeholderAttrs
+        )
+        searchField.translatesAutoresizingMaskIntoConstraints = false
+        searchRow.addSubview(searchField)
+
+        NSLayoutConstraint.activate([
+            searchIcon.leadingAnchor.constraint(equalTo: searchRow.leadingAnchor, constant: 16),
+            searchIcon.centerYAnchor.constraint(equalTo: searchRow.centerYAnchor),
+            searchIcon.widthAnchor.constraint(equalToConstant: 20),
+            searchIcon.heightAnchor.constraint(equalToConstant: 20),
+
+            searchField.leadingAnchor.constraint(equalTo: searchIcon.trailingAnchor, constant: 8),
+            searchField.trailingAnchor.constraint(equalTo: searchRow.trailingAnchor, constant: -16),
+            searchField.centerYAnchor.constraint(equalTo: searchRow.centerYAnchor),
+        ])
+
+        // Divider
+        let divider = NSBox(frame: NSRect(x: 0, y: height - 49, width: width, height: 1))
+        divider.boxType = .custom
+        divider.fillColor = NSColor(white: 1.0, alpha: 0.08)
+        divider.borderWidth = 0
+        vibrancy.addSubview(divider)
+
+        // Table view
+        tableView.style = .plain
+        tableView.backgroundColor = .clear
+        tableView.headerView = nil
+        tableView.intercellSpacing = NSSize(width: 0, height: 1)
+        tableView.rowHeight = 40
+        tableView.selectionHighlightStyle = .regular
+        tableView.dataSource = self
+        tableView.delegate = self
+        tableView.action = #selector(tableViewClicked)
+        tableView.doubleAction = #selector(tableViewDoubleClicked)
+        tableView.target = self
+        tableView.gridColor = .clear
+        tableView.usesAlternatingRowBackgroundColors = false
+
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("record"))
+        column.width = width
+        tableView.addTableColumn(column)
+
+        // Scroll view
+        let tableTop = height - 50
+        let tableBottom: CGFloat = 8
+        let clipView = NoIBeamClipView()
+        clipView.drawsBackground = false
+        scrollView.contentView = clipView
+        scrollView.frame = NSRect(x: 0, y: tableBottom, width: width, height: tableTop - tableBottom)
+        scrollView.documentView = tableView
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .noBorder
+        scrollView.backgroundColor = .clear
+        scrollView.drawsBackground = false
+        vibrancy.addSubview(scrollView)
+
+        // Empty state label
+        emptyLabel.frame = NSRect(x: 0, y: 160, width: width, height: 60)
+        emptyLabel.stringValue = "No history yet.\nUse Globe key to dictate."
+        emptyLabel.alignment = .center
+        emptyLabel.textColor = NSColor(white: 0.45, alpha: 1.0)
+        emptyLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        emptyLabel.isBezeled = false
+        emptyLabel.drawsBackground = false
+        emptyLabel.isEditable = false
+        emptyLabel.isSelectable = false
+        emptyLabel.isHidden = true
+        vibrancy.addSubview(emptyLabel)
+    }
+
+    // MARK: - Key Handling
+
+    private func setupKeyMonitor() {
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, isVisible else { return event }
+            return handleKeyDown(event) ? nil : event
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let monitor = localKeyMonitor {
+            NSEvent.removeMonitor(monitor)
+            localKeyMonitor = nil
+        }
+    }
+
+    private func setupClickOutsideMonitor() {
+        // Local monitor: catches clicks within the app - check if outside our window
+        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [
+            .leftMouseDown,
+            .rightMouseDown,
+        ]) { [weak self] event in
+            guard let self, isVisible else { return event }
+
+            // Convert click location to screen coordinates
+            let clickLocation = event.locationInWindow
+            if let eventWindow = event.window {
+                let screenLocation = eventWindow.convertPoint(toScreen: clickLocation)
+                // Check if click is outside our panel
+                if !frame.contains(screenLocation) {
+                    dismiss()
+                    return nil // Consume the event
+                }
+            } else {
+                // Click with no window (shouldn't happen but handle it)
+                dismiss()
+                return nil
+            }
+            return event
+        }
+
+        // Global monitor: catches clicks outside the app entirely
+        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [
+            .leftMouseDown,
+            .rightMouseDown,
+        ]) { [weak self] _ in
+            guard let self, isVisible else { return }
+            dismiss()
+        }
+    }
+
+    private func removeClickOutsideMonitor() {
+        if let monitor = localClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            localClickMonitor = nil
+        }
+        if let monitor = globalClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            globalClickMonitor = nil
+        }
+    }
+
+    private func setupCursorMonitor() {
+        mouseMovedMonitor = NSEvent.addLocalMonitorForEvents(matching: [
+            .mouseMoved,
+            .mouseEntered,
+            .mouseExited,
+            .scrollWheel,
+        ]) { [weak self] event in
+            guard let self, isVisible else { return event }
+
+            let locationInWindow = event.locationInWindow
+            let scrollViewFrame = scrollView.frame
+            let scrollerWidth: CGFloat = 15
+            let tableAreaFrame = NSRect(
+                x: scrollViewFrame.origin.x,
+                y: scrollViewFrame.origin.y,
+                width: scrollViewFrame.width - scrollerWidth,
+                height: scrollViewFrame.height
+            )
+
+            if tableAreaFrame.contains(locationInWindow) {
+                NSCursor.pointingHand.set()
+            } else {
+                NSCursor.arrow.set()
+            }
+
+            return event
+        }
+    }
+
+    private func removeCursorMonitor() {
+        if let monitor = mouseMovedMonitor {
+            NSEvent.removeMonitor(monitor)
+            mouseMovedMonitor = nil
+        }
+        NSCursor.arrow.set()
+    }
+
+    private func handleKeyDown(_ event: NSEvent) -> Bool {
+        switch Int(event.keyCode) {
+        case kVK_Escape:
+            dismiss()
+            return true
+
+        case kVK_Return, kVK_ANSI_KeypadEnter:
+            selectCurrentItem()
+            return true
+
+        case kVK_UpArrow:
+            moveSelection(by: -1)
+            return true
+
+        case kVK_DownArrow:
+            moveSelection(by: 1)
+            return true
+
+        default:
+            return false
+        }
+    }
+
+    // MARK: - Public API
+
+    /// Show the palette centered on screen
+    func showPalette() {
+        // Load fresh data
+        reloadData()
+
+        // Clear search and reset selection
+        searchField.stringValue = ""
+        filteredRecords = records
+        selectedIndex = 0
+        tableView.reloadData()
+        updateSelection()
+        updateEmptyState()
+
+        // Center on screen, shifted up slightly
+        if let screen = NSScreen.main {
+            let screenFrame = screen.visibleFrame
+            let x = screenFrame.midX - 290
+            let y = screenFrame.midY - 210 + 80
+            setFrame(NSRect(x: x, y: y, width: 580, height: 420), display: true)
+        }
+
+        setupKeyMonitor()
+        setupClickOutsideMonitor()
+        setupCursorMonitor()
+
+        // Activate app and show window
+        NSApp.activate(ignoringOtherApps: true)
+        makeKeyAndOrderFront(nil)
+
+        // Force first responder to search field
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            makeFirstResponder(searchField)
+        }
+
+        logInfo("History palette shown with \(records.count) records")
+    }
+
+    /// Dismiss the palette
+    func dismiss() {
+        removeKeyMonitor()
+        removeClickOutsideMonitor()
+        removeCursorMonitor()
+        orderOut(nil)
+        onDismiss?()
+        logInfo("History palette dismissed")
+    }
+
+    // MARK: - Private Helpers
+
+    private func reloadData() {
+        records = HistoryStore.shared.recent(limit: 100)
+    }
+
+    private func filterRecords(query: String) {
+        if query.isEmpty {
+            filteredRecords = records
+        } else {
+            filteredRecords = HistoryStore.shared.search(query: query)
+        }
+
+        selectedIndex = 0
+        tableView.reloadData()
+        updateSelection()
+        updateEmptyState()
+    }
+
+    private func moveSelection(by delta: Int) {
+        guard !filteredRecords.isEmpty else { return }
+
+        let next = selectedIndex + delta
+        if next < 0 {
+            selectedIndex = filteredRecords.count - 1
+        } else if next >= filteredRecords.count {
+            selectedIndex = 0
+        } else {
+            selectedIndex = next
+        }
+
+        // Suppress hover-to-select while keyboard scrolling shifts rows under the cursor.
+        tableView.isKeyboardNavigating = true
+        updateSelection()
+        tableView.scrollRowToVisible(selectedIndex)
+
+        // Re-enable hover after a brief delay so the scroll settles.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.tableView.isKeyboardNavigating = false
+        }
+    }
+
+    private func updateSelection() {
+        guard !filteredRecords.isEmpty, selectedIndex >= 0 else { return }
+        tableView.selectRowIndexes(IndexSet(integer: selectedIndex), byExtendingSelection: false)
+    }
+
+    private func updateEmptyState() {
+        let empty = filteredRecords.isEmpty
+        emptyLabel.isHidden = !empty
+        scrollView.isHidden = empty
+    }
+
+    private func selectCurrentItem() {
+        guard selectedIndex >= 0, selectedIndex < filteredRecords.count else { return }
+
+        let record = filteredRecords[selectedIndex]
+        dismiss()
+        onSelect?(record)
+    }
+
+    @objc private func searchFieldAction() {
+        selectCurrentItem()
+    }
+
+    @objc private func tableViewClicked() {
+        let row = tableView.clickedRow
+        guard row >= 0, row < filteredRecords.count else { return }
+        selectedIndex = row
+        selectCurrentItem()
+    }
+
+    @objc private func tableViewDoubleClicked() {
+        let row = tableView.clickedRow
+        guard row >= 0, row < filteredRecords.count else { return }
+
+        selectedIndex = row
+        selectCurrentItem()
+    }
+}
+
+// MARK: - NSTextFieldDelegate
+
+extension HistoryPaletteWindow: NSTextFieldDelegate {
+    func controlTextDidChange(_ obj: Notification) {
+        filterRecords(query: searchField.stringValue)
+    }
+}
+
+// MARK: - NSTableViewDataSource
+
+extension HistoryPaletteWindow: NSTableViewDataSource {
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        filteredRecords.count
+    }
+}
+
+// MARK: - NSTableViewDelegate
+
+extension HistoryPaletteWindow: NSTableViewDelegate {
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard row < filteredRecords.count else { return nil }
+
+        let record = filteredRecords[row]
+
+        let cellIdentifier = NSUserInterfaceItemIdentifier("HistoryCell")
+        var cellView = tableView.makeView(withIdentifier: cellIdentifier, owner: nil) as? HistoryRecordCellView
+
+        if cellView == nil {
+            cellView = HistoryRecordCellView()
+            cellView?.identifier = cellIdentifier
+        }
+
+        cellView?.configure(with: record)
+        return cellView
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        if tableView.selectedRow >= 0 {
+            selectedIndex = tableView.selectedRow
+        }
+    }
+
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        HistoryRowView()
+    }
+}

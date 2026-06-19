@@ -1,0 +1,53 @@
+# Xcode
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+*.xcuserstate
+DerivedData/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+*.xcframework
+
+# macOS
+.DS_Store
+*.dSYM
+
+# IDE
+.idea/
+*.swp
+*~
+
+# Build artifacts
+build/
+*.app
+*.dmg
+
+# Logs (keep log directory but not logs)
+~/Library/Logs/Hisohiso/*.log
+
+# Models (downloaded separately)
+Models/
+
+# ML model binaries (use Git LFS or download on demand)
+*.mlpackage/
+*.mlpackage.backup/
+*.mlmodelc/
+
+# Image assets committed by mistake
+Resources/*.jpg
+Resources/*.png
+
+**/.DS_Store
+Hisohiso.app/
+
+# Agent / AI config (public repo)
+.claude/
+.tallow/
+CLAUDE.md
+AGENTS.md
+PLAN.md
+
+# Planner local state
+.plans/**/plan.db

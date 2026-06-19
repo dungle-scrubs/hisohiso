@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  quality-gate:
+    name: Swift quality gate
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: Run tests
+        run: swift test
+
+      - name: Build debug executable
+        run: swift build
+
+      - name: Build release executable
+        run: swift build -c release
+
+      - name: Run SwiftLint
+        run: make lint
+
+  release-please:
+    runs-on: ubuntu-latest
+    needs: quality-gate
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
