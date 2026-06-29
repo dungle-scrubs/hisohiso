@@ -1,5 +1,6 @@
 import Carbon.HIToolbox
 import Cocoa
+import os
 
 // MARK: - HistoryHotkeyMonitor
 
@@ -7,14 +8,26 @@ import Cocoa
 ///
 /// Uses the shared `EventTapManager` instead of creating its own CGEventTap.
 /// Hotkey configuration is persisted to UserDefaults via `KeyCombo`.
+///
+/// The hotkey configuration is stored in a lock-protected field so the event tap
+/// callback (which runs on an arbitrary thread) can read it safely, mirroring
+/// `HotkeyManager`'s pattern.
 final class HistoryHotkeyMonitor: @unchecked Sendable {
     private static let registrationID = "history-hotkey-monitor"
 
     /// Default hotkey when no saved value exists.
     static let defaultHotkey: KeyCombo = .ctrlOptionSpace
 
-    /// Current hotkey combo.
-    private(set) var currentHotkey: KeyCombo?
+    /// Thread-safe copy of the hotkey for the event tap callback.
+    /// The CGEventTap callback fires on an arbitrary thread and must read
+    /// the hotkey synchronously to decide whether to consume the event.
+    private let hotkeyLock: os.OSAllocatedUnfairLock<KeyCombo?>
+
+    /// Current hotkey combo (nil = disabled).
+    /// Reads/writes through the lock so the event tap callback stays race-free.
+    var currentHotkey: KeyCombo? {
+        hotkeyLock.withLock { $0 }
+    }
 
     /// Callback when hotkey is pressed.
     var onHotkey: (@MainActor () -> Void)?
@@ -25,6 +38,7 @@ final class HistoryHotkeyMonitor: @unchecked Sendable {
     /// - Parameter defaults: UserDefaults to read/write hotkey config.
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        hotkeyLock = os.OSAllocatedUnfairLock(initialState: nil)
         loadSavedHotkey()
     }
 
@@ -48,7 +62,7 @@ final class HistoryHotkeyMonitor: @unchecked Sendable {
             eventTypes: [.keyDown]
         ) { [weak self] event, _ in
             guard let self else { return false }
-            return handleKeyDown(event)
+            return self.handleKeyDown(event)
         }
 
         guard EventTapManager.shared.start() else {
@@ -70,7 +84,7 @@ final class HistoryHotkeyMonitor: @unchecked Sendable {
     /// - Parameter keyCombo: New hotkey, or `nil` to disable.
     func setHotkey(_ keyCombo: KeyCombo?) {
         stop()
-        currentHotkey = keyCombo
+        hotkeyLock.withLock { $0 = keyCombo }
         saveHotkey()
 
         if keyCombo != nil {
@@ -87,15 +101,16 @@ final class HistoryHotkeyMonitor: @unchecked Sendable {
               let hotkey = try? JSONDecoder().decode(KeyCombo.self, from: data)
         else {
             // No saved value — use default
-            currentHotkey = Self.defaultHotkey
+            hotkeyLock.withLock { $0 = Self.defaultHotkey }
             return
         }
-        currentHotkey = hotkey
+        hotkeyLock.withLock { $0 = hotkey }
         logInfo("Loaded saved history hotkey: \(hotkey.displayString)")
     }
 
     private func saveHotkey() {
-        if let hotkey = currentHotkey,
+        let hotkey = currentHotkey
+        if let hotkey,
            let data = try? JSONEncoder().encode(hotkey)
         {
             defaults.set(data, for: .historyHotkey)
@@ -106,8 +121,11 @@ final class HistoryHotkeyMonitor: @unchecked Sendable {
 
     // MARK: - Event Handling
 
-    private func handleKeyDown(_ event: CGEvent) -> Bool {
-        guard let hotkey = currentHotkey else { return false }
+    /// Handle key events from the event tap callback (runs on arbitrary thread).
+    /// Reads the hotkey from a lock-protected field to avoid data races.
+    private nonisolated func handleKeyDown(_ event: CGEvent) -> Bool {
+        // Read hotkey from thread-safe storage
+        guard let hotkey = hotkeyLock.withLock({ $0 }) else { return false }
 
         let eventKeyCode = UInt32(event.getIntegerValueField(.keyboardEventKeycode))
         guard eventKeyCode == hotkey.keyCode else { return false }
