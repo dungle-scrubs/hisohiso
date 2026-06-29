@@ -265,7 +265,9 @@ final class DictationController: ObservableObject {
 
         // Set state FIRST so release callback knows we're recording
         stateManager.setRecording()
-        await mediaPlaybackCoordinator.pauseForRecording()
+        if AppPreferences.shared.pauseMediaDuringRecording {
+            await mediaPlaybackCoordinator.pauseForRecording()
+        }
         audioFeedback.playStart()
         recordingStartTime = Date()
 

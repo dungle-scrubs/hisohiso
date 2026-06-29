@@ -22,6 +22,7 @@ final class AppSettingsTests: XCTestCase {
         // Compile-time guarantee via enum, but verify raw values are distinct.
         let allKeys: [SettingsKey] = [
             .selectedAudioDeviceUID, .audioFeedbackEnabled, .useAudioKit,
+            .pauseMediaDuringRecording,
             .selectedModel, .alternativeHotkey, .historyHotkey,
             .wakeWordEnabled, .wakePhrase,
             .showFloatingPill,
