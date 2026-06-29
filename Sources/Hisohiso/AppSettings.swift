@@ -13,6 +13,9 @@ enum SettingsKey: String {
     case audioFeedbackEnabled
     case useAudioKit
 
+    /// Media playback
+    case pauseMediaDuringRecording
+
     /// Model
     case selectedModel
 

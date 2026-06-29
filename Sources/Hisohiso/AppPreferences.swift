@@ -41,6 +41,16 @@ final class AppPreferences {
         set { defaults.set(newValue, for: .useAudioKit) }
     }
 
+    /// Whether to pause media playback (Music, Spotify, browsers) during recording.
+    var pauseMediaDuringRecording: Bool {
+        get {
+            defaults.hasValue(for: .pauseMediaDuringRecording)
+                ? defaults.bool(for: .pauseMediaDuringRecording)
+                : true
+        }
+        set { defaults.set(newValue, for: .pauseMediaDuringRecording) }
+    }
+
     /// Whether to show the floating pill recording indicator.
     var showFloatingPill: Bool {
         get { defaults.bool(for: .showFloatingPill) }

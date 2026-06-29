@@ -8,6 +8,7 @@ final class GeneralPreferencesTab: NSView {
     private var floatingPillToggle: NSButton!
     private var microphonePopup: NSPopUpButton!
     private var useAudioKitToggle: NSButton!
+    private var pauseMediaToggle: NSButton!
     private let supportsLaunchAtLogin = Bundle.main.bundleURL.pathExtension == "app"
     private let preferences = AppPreferences.shared
 
@@ -53,6 +54,15 @@ final class GeneralPreferencesTab: NSView {
         addSubview(audioFeedbackToggle)
         y -= 30
 
+        pauseMediaToggle = NSButton(
+            checkboxWithTitle: "Pause media while recording (Music, Spotify, browsers)",
+            target: self,
+            action: #selector(pauseMediaChanged)
+        )
+        pauseMediaToggle.frame = NSRect(x: 20, y: y, width: 420, height: 20)
+        addSubview(pauseMediaToggle)
+        y -= 30
+
         let launchTitle = supportsLaunchAtLogin ? "Launch at login" : "Launch at login (app bundle only)"
         launchAtLoginToggle = NSButton(
             checkboxWithTitle: launchTitle,
@@ -94,6 +104,7 @@ final class GeneralPreferencesTab: NSView {
         launchAtLoginToggle.state = supportsLaunchAtLogin && SMAppService.mainApp.status == .enabled ? .on : .off
         floatingPillToggle.state = preferences.showFloatingPill ? .on : .off
         useAudioKitToggle.state = preferences.useAudioKit ? .on : .off
+        pauseMediaToggle.state = preferences.pauseMediaDuringRecording ? .on : .off
     }
 
     // MARK: - Actions
@@ -125,6 +136,10 @@ final class GeneralPreferencesTab: NSView {
 
     @objc private func audioFeedbackChanged() {
         preferences.audioFeedbackEnabled = audioFeedbackToggle.state == .on
+    }
+
+    @objc private func pauseMediaChanged() {
+        preferences.pauseMediaDuringRecording = pauseMediaToggle.state == .on
     }
 
     @objc private func launchAtLoginChanged() {
