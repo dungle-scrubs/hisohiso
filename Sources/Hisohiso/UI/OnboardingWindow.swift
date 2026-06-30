@@ -1,6 +1,5 @@
 import AVFoundation
 import Cocoa
-import ServiceManagement
 
 /// Onboarding window shown on first launch
 final class OnboardingWindow: NSWindow {
@@ -167,9 +166,11 @@ final class OnboardingWindow: NSWindow {
 
         if supportsLaunchAtLogin, launchToggle.state == .on {
             do {
-                try SMAppService.mainApp.register()
+                // No-op when the LaunchAgent already owns startup, so onboarding
+                // never adds a second launcher.
+                try LaunchAtLoginManager.setEnabled(true)
             } catch {
-                logError("Failed to enable launch at login during onboarding: \(error)")
+                logError("Failed to enable launch at login during onboarding: \(error.localizedDescription)")
             }
         }
 

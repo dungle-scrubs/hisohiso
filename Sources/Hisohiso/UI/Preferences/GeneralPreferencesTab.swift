@@ -1,5 +1,4 @@
 import Cocoa
-import ServiceManagement
 
 /// General preferences tab: microphone, audio feedback, launch at login, recording indicators.
 final class GeneralPreferencesTab: NSView {
@@ -101,7 +100,14 @@ final class GeneralPreferencesTab: NSView {
                 preferences.audioFeedbackEnabled
             ) ?
             .on : .off
-        launchAtLoginToggle.state = supportsLaunchAtLogin && SMAppService.mainApp.status == .enabled ? .on : .off
+        launchAtLoginToggle.state = LaunchAtLoginManager.isEnabled ? .on : .off
+        // When the LaunchAgent owns startup, launch-at-login is on and cannot be
+        // turned off here - it is managed by the background service.
+        let managedByAgent = LaunchAtLoginManager.launchAgentInstalled
+        launchAtLoginToggle.isEnabled = supportsLaunchAtLogin && !managedByAgent
+        launchAtLoginToggle.toolTip = managedByAgent
+            ? "Managed by the Hisohiso background service (launchd)."
+            : nil
         floatingPillToggle.state = preferences.showFloatingPill ? .on : .off
         useAudioKitToggle.state = preferences.useAudioKit ? .on : .off
         pauseMediaToggle.state = preferences.pauseMediaDuringRecording ? .on : .off
@@ -143,13 +149,15 @@ final class GeneralPreferencesTab: NSView {
     }
 
     @objc private func launchAtLoginChanged() {
-        guard supportsLaunchAtLogin else { launchAtLoginToggle.state = .off; return }
+        guard supportsLaunchAtLogin, !LaunchAtLoginManager.launchAgentInstalled else {
+            launchAtLoginToggle.state = LaunchAtLoginManager.isEnabled ? .on : .off
+            return
+        }
         do {
-            if launchAtLoginToggle.state == .on { try SMAppService.mainApp.register() }
-            else { try SMAppService.mainApp.unregister() }
+            try LaunchAtLoginManager.setEnabled(launchAtLoginToggle.state == .on)
         } catch {
-            logError("Failed to update launch at login: \(error)")
-            launchAtLoginToggle.state = SMAppService.mainApp.status == .enabled ? .on : .off
+            logError("Failed to update launch at login: \(error.localizedDescription)")
+            launchAtLoginToggle.state = LaunchAtLoginManager.isEnabled ? .on : .off
         }
     }
 

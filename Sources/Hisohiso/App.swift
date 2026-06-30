@@ -1,6 +1,5 @@
 import Cocoa
 import Combine
-import Darwin
 
 @main
 enum HisohisoMain {
@@ -42,16 +41,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        if shouldDeferToLaunchdInstance() {
-            kickstartLaunchdInstance()
-            NSApp.terminate(nil)
-            return
-        }
-
+        // The instance lock is the single source of truth for "only one app
+        // runs". flock is atomic, so when two copies launch at once (e.g. the
+        // LaunchAgent and a stray login item) exactly one wins and the rest exit.
         guard acquireSingleInstanceLock() else {
             NSApp.terminate(nil)
             return
         }
+
+        // Collapse to one autostart mechanism so a duplicate never launches again.
+        LaunchAtLoginManager.reconcile()
 
         _ = lifecycleCoordinator.prepareLaunch()
 
@@ -82,77 +81,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             singleInstanceLock = try SingleInstanceLock()
             return true
         } catch let SingleInstanceLockError.alreadyRunning(ownerPID) {
-            if isManagedByLaunchd,
-               let ownerPID,
-               terminateExistingInstance(pid: ownerPID),
-               let lock = try? SingleInstanceLock()
-            {
-                singleInstanceLock = lock
-                return true
+            if let ownerPID {
+                logInfo("Another Hisohiso instance is already running (PID \(ownerPID)); exiting duplicate launch")
+            } else {
+                logInfo("Another Hisohiso instance is already running; exiting duplicate launch")
             }
-
-            logInfo("Another Hisohiso instance is already running; exiting duplicate launch")
             return false
         } catch {
             logError("Failed to acquire Hisohiso instance lock: \(error.localizedDescription)")
             return false
         }
-    }
-
-    /// Prefer the LaunchAgent-owned app process over LaunchServices/manual launches.
-    private func shouldDeferToLaunchdInstance() -> Bool {
-        !isManagedByLaunchd && launchdJobIsLoaded()
-    }
-
-    private var isManagedByLaunchd: Bool {
-        ProcessInfo.processInfo.environment["HISOHISO_MANAGED"] == "launchd"
-    }
-
-    private func launchdJobIsLoaded() -> Bool {
-        runLaunchctl(arguments: ["print", launchdJobTarget()]) == 0
-    }
-
-    private func kickstartLaunchdInstance() {
-        _ = runLaunchctl(arguments: ["kickstart", "-k", launchdJobTarget()])
-    }
-
-    private func launchdJobTarget() -> String {
-        "gui/\(getuid())/com.hisohiso.app"
-    }
-
-    private func runLaunchctl(arguments: [String]) -> Int32 {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        process.arguments = arguments
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus
-        } catch {
-            return 1
-        }
-    }
-
-    private func terminateExistingInstance(pid: Int32) -> Bool {
-        guard pid > 0, pid != ProcessInfo.processInfo.processIdentifier else {
-            return false
-        }
-
-        guard kill(pid, SIGTERM) == 0 else {
-            return false
-        }
-
-        for _ in 0..<20 {
-            usleep(50000)
-            if kill(pid, 0) != 0, errno == ESRCH {
-                return true
-            }
-        }
-
-        return false
     }
 
     func applicationWillTerminate(_ notification: Notification) {

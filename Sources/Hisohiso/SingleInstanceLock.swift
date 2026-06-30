@@ -29,8 +29,26 @@ enum SingleInstanceLockError: Error, LocalizedError, Equatable {
 /// those when a LaunchAgent starts the executable directly, so the app needs its
 /// own guard before installing global event taps.
 final class SingleInstanceLock {
-    static let defaultLockURL = FileManager.default.temporaryDirectory
-        .appendingPathComponent("com.hisohiso.app.lock")
+    /// Stable lock location.
+    ///
+    /// The lock previously lived in `FileManager.temporaryDirectory`
+    /// (`/var/folders/.../T/`), which macOS purges after a few days of no
+    /// access. When that happened the on-disk file vanished while the owner held
+    /// an unlinked fd, so a fresh launch would `open(O_CREAT)` a brand-new inode
+    /// and lock it independently - silently disarming the guard. Application
+    /// Support is not purged, so the lock file persists for the process lifetime.
+    static let defaultLockURL: URL = {
+        let fileManager = FileManager.default
+        let baseDir = (try? fileManager.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )) ?? fileManager.temporaryDirectory
+        let appDir = baseDir.appendingPathComponent("Hisohiso", isDirectory: true)
+        try? fileManager.createDirectory(at: appDir, withIntermediateDirectories: true)
+        return appDir.appendingPathComponent("instance.lock")
+    }()
 
     private let fd: Int32
 
