@@ -196,7 +196,13 @@ enum AppConstants {
     // MARK: - External Control
 
     /// Unix socket path for local app-control commands.
-    static let controlSocketPath = "/tmp/hisohiso-control.sock"
+    ///
+    /// Uses the per-user private temporary directory (the same location
+    /// `SingleInstanceLock` uses) rather than the world-writable sticky `/tmp`,
+    /// so other local users cannot pre-create or hijack the socket. The path is
+    /// stable across launches because `temporaryDirectory` is per-user stable.
+    static let controlSocketPath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("hisohiso-control.sock").path
 
     // MARK: - Debug
 

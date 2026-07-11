@@ -140,15 +140,27 @@ class BaseCloudProvider: CloudProvider, @unchecked Sendable {
     let model: String
     let keychainKeyType: KeychainManager.APIKeyType
 
+    /// URL session used for transcription requests.
+    /// Injectable so tests can drive the 200/401/429/error dispatch without live network.
+    let urlSession: URLSession
+
     /// Request timeout in seconds
     private let timeoutInterval: TimeInterval = 30
 
-    init(id: String, displayName: String, apiURL: URL, model: String, keychainKeyType: KeychainManager.APIKeyType) {
+    init(
+        id: String,
+        displayName: String,
+        apiURL: URL,
+        model: String,
+        keychainKeyType: KeychainManager.APIKeyType,
+        urlSession: URLSession = .shared
+    ) {
         self.id = id
         self.displayName = displayName
         self.apiURL = apiURL
         self.model = model
         self.keychainKeyType = keychainKeyType
+        self.urlSession = urlSession
     }
 
     var isConfigured: Bool {
@@ -181,7 +193,7 @@ class BaseCloudProvider: CloudProvider, @unchecked Sendable {
         logInfo("\(displayName): sending \(wavData.count) bytes of audio")
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await urlSession.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw CloudTranscriptionError.invalidResponse

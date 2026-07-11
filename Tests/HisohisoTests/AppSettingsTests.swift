@@ -99,7 +99,9 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertLessThan(AppConstants.globeHoldThreshold, 1.0)
         XCTAssertGreaterThan(AppConstants.waveformBarCount, 0)
         XCTAssertGreaterThan(AppConstants.maxLogAgeDays, 0)
-        XCTAssertTrue(AppConstants.controlSocketPath.hasPrefix("/tmp/"))
+        // Control socket lives in the per-user private temporary directory
+        // rather than world-writable /tmp, so only require an absolute path.
+        XCTAssertTrue(AppConstants.controlSocketPath.hasPrefix("/"))
         XCTAssertTrue(AppConstants.controlSocketPath.hasSuffix(".sock"))
     }
 }

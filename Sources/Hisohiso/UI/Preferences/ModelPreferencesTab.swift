@@ -145,10 +145,16 @@ final class ModelPreferencesTab: NSView {
     @objc private func modelChanged() {
         guard let model = getSelectedModel() else { return }
         Task { @MainActor in
-            try? await modelSelectionController.requestSelection(model)
+            do {
+                try await modelSelectionController.requestSelection(model)
+                logInfo("Model changed to: \(model.displayName)")
+                updateModelUI()
+            } catch {
+                statusLabel.stringValue = "✗ Failed: \(error.localizedDescription)"
+                statusLabel.textColor = .systemRed
+                logError("Model selection failed: \(error)")
+            }
         }
-        logInfo("Model changed to: \(model.displayName)")
-        updateModelUI()
     }
 
     @objc private func downloadModel() {
@@ -171,6 +177,10 @@ final class ModelPreferencesTab: NSView {
                 try await modelManager.downloadModel(model)
                 statusLabel.stringValue = "✓ Download complete!"
                 statusLabel.textColor = .systemGreen
+            } catch ModelManagerError.downloadAlreadyInProgress {
+                statusLabel.stringValue = "Download already in progress…"
+                statusLabel.textColor = .secondaryLabelColor
+                logWarning("Download already in progress")
             } catch {
                 statusLabel.stringValue = "✗ Failed: \(error.localizedDescription)"
                 statusLabel.textColor = .systemRed

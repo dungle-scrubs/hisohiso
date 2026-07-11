@@ -4,6 +4,24 @@
 import AppKit
 import Carbon.HIToolbox
 
+// MARK: - Tracking area helper
+
+extension NSView {
+    /// Removes `existing`, installs a fresh full-bounds tracking area owned by
+    /// this view with the given options, and returns it to store.
+    func refreshedTrackingArea(
+        replacing existing: NSTrackingArea?,
+        options: NSTrackingArea.Options
+    ) -> NSTrackingArea {
+        if let existing {
+            removeTrackingArea(existing)
+        }
+        let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
+        addTrackingArea(area)
+        return area
+    }
+}
+
 // MARK: - HistoryRowView
 
 final class HistoryRowView: NSTableRowView {
@@ -11,16 +29,10 @@ final class HistoryRowView: NSTableRowView {
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
-        if let existing = trackingArea {
-            removeTrackingArea(existing)
-        }
-        trackingArea = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-            owner: self,
-            userInfo: nil
+        trackingArea = refreshedTrackingArea(
+            replacing: trackingArea,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect]
         )
-        addTrackingArea(trackingArea!)
     }
 
     override func mouseEntered(with event: NSEvent) {
@@ -79,16 +91,10 @@ final class PointerTableView: NSTableView {
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
-        if let existing = trackingArea {
-            removeTrackingArea(existing)
-        }
-        trackingArea = NSTrackingArea(
-            rect: bounds,
-            options: [.cursorUpdate, .activeAlways, .inVisibleRect],
-            owner: self,
-            userInfo: nil
+        trackingArea = refreshedTrackingArea(
+            replacing: trackingArea,
+            options: [.cursorUpdate, .activeAlways, .inVisibleRect]
         )
-        addTrackingArea(trackingArea!)
     }
 
     override func cursorUpdate(with event: NSEvent) {

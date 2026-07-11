@@ -2,6 +2,18 @@ import FluidAudio
 import Foundation
 import WhisperKit
 
+/// Errors thrown by `ModelManager`.
+enum ModelManagerError: Error, LocalizedError {
+    case downloadAlreadyInProgress
+
+    var errorDescription: String? {
+        switch self {
+        case .downloadAlreadyInProgress:
+            "A model download is already in progress"
+        }
+    }
+}
+
 /// Manages model downloads and storage for both WhisperKit and FluidAudio
 @MainActor
 final class ModelManager: ObservableObject {
@@ -70,7 +82,7 @@ final class ModelManager: ObservableObject {
     func downloadModel(_ model: TranscriptionModel) async throws {
         guard !isDownloading else {
             logWarning("Download already in progress")
-            return
+            throw ModelManagerError.downloadAlreadyInProgress
         }
 
         isDownloading = true

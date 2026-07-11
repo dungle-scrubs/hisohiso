@@ -170,9 +170,18 @@ final class HotkeyManager: ObservableObject {
         let keyCode = UInt32(event.getIntegerValueField(.keyboardEventKeycode))
         guard keyCode == hotkey.keyCode else { return false }
 
-        // Check modifiers match exactly (ignoring caps lock)
-        let currentModifiers = KeyCombo(keyCode: keyCode, flags: event.flags).modifiers
-        guard currentModifiers == hotkey.modifiers else { return false }
+        // Require the full modifier match only on key-DOWN. On key-UP the user may
+        // have already released one or more modifiers before the main key of the
+        // chord (e.g. releasing Ctrl before Space in Ctrl+Option+Space), so the
+        // live flags no longer match the configured combo. Matching the tracked
+        // keyCode alone on key-UP lets us clear the pressed state and fire
+        // onHotkeyUp regardless of the current flags. Without this, releasing a
+        // modifier first would leave isHotkeyPressed stuck true and recording
+        // would never stop via the hotkey.
+        if isDown {
+            let currentModifiers = KeyCombo(keyCode: keyCode, flags: event.flags).modifiers
+            guard currentModifiers == hotkey.modifiers else { return false }
+        }
 
         Task { @MainActor [weak self] in
             guard let self else { return }

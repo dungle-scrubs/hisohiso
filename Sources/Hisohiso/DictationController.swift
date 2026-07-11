@@ -8,7 +8,8 @@ final class DictationController: ObservableObject {
     private let globeMonitor = GlobeKeyMonitor()
     let audioRecorder = AudioRecorder()
     private let audioKitRecorder = AudioKitRecorder()
-    private let transcriber = Transcriber()
+    let transcriber: TranscribingService
+    let voiceVerifier: VoiceVerifying
 
     /// Whether to use AudioKit for recording (with noise handling)
     var useAudioKit: Bool {
@@ -17,25 +18,25 @@ final class DictationController: ObservableObject {
     }
 
     /// The active recorder, selected by the `useAudioKit` preference.
-    private var activeRecorder: AudioRecording {
+    var activeRecorder: AudioRecording {
         useAudioKit ? audioKitRecorder : audioRecorder
     }
 
-    private let textInserter = TextInserter()
-    private let textFormatter = TextFormatter()
-    private let audioFeedback = AudioFeedback()
-    private let mediaPlaybackCoordinator: MediaPlaybackCoordinator
-    private let modelManager: ModelManager
+    let textInserter = TextInserter()
+    let textFormatter = TextFormatter()
+    let audioFeedback = AudioFeedback()
+    let mediaPlaybackCoordinator: MediaPlaybackCoordinator
+    let modelManager: ModelManager
     private let hotkeyManager: HotkeyManager?
-    private let historyStore = HistoryStore.shared
-    private let waveformBridge = WaveformBridge.shared
+    let historyStore = HistoryStore.shared
+    let waveformBridge = WaveformBridge.shared
 
     @Published private(set) var stateManager = RecordingStateManager()
 
     /// Track recording start time for duration calculation
-    private var recordingStartTime: Date?
+    var recordingStartTime: Date?
 
-    private lazy var audioLevelPublisher = AudioLevelPublisher(
+    lazy var audioLevelPublisher = AudioLevelPublisher(
         sampleProvider: { [weak self] in self?.activeRecorder.getRecentSamples(count: 1600) ?? [] },
         levelSink: { [weak self] levels in self?.onAudioLevels?(levels) },
         autoStop: { [weak self] in
@@ -57,11 +58,15 @@ final class DictationController: ObservableObject {
     init(
         modelManager: ModelManager,
         hotkeyManager: HotkeyManager? = nil,
-        mediaPlaybackCoordinator: MediaPlaybackCoordinator = MediaPlaybackCoordinator()
+        mediaPlaybackCoordinator: MediaPlaybackCoordinator = MediaPlaybackCoordinator(),
+        transcriber: TranscribingService = Transcriber(),
+        voiceVerifier: VoiceVerifying = VoiceVerifier.shared
     ) {
         self.modelManager = modelManager
         self.hotkeyManager = hotkeyManager
         self.mediaPlaybackCoordinator = mediaPlaybackCoordinator
+        self.transcriber = transcriber
+        self.voiceVerifier = voiceVerifier
         setupCallbacks()
     }
 
@@ -263,33 +268,48 @@ final class DictationController: ObservableObject {
         // Track if this was triggered by wake word for auto-stop
         isWakeWordTriggered = fromWakeWord
 
-        // Set state FIRST so release callback knows we're recording
-        stateManager.setRecording()
-        if AppPreferences.shared.pauseMediaDuringRecording {
-            await mediaPlaybackCoordinator.pauseForRecording()
-        }
-        audioFeedback.playStart()
-        recordingStartTime = Date()
-
+        // Start the recorder BEFORE claiming the recording state. If it throws,
+        // no media has been paused yet, so fail straight to an error state.
         do {
             try activeRecorder.startRecording()
-            logInfo(
-                "Using \(useAudioKit ? "AudioKit" : "AVAudioEngine") recorder\(fromWakeWord ? " (wake word triggered, auto-stop enabled)" : "")"
-            )
-
-            waveformBridge.sendState(.recording)
-
-            // Start audio level updates for the floating waveform
-            startAudioLevelUpdates()
-
-            // Start escape key monitor to cancel recording
-            startEscapeMonitor()
         } catch {
             logError("Failed to start recording: \(error)")
             mediaPlaybackCoordinator.resumeAfterRecording()
             stateManager.setError("Failed to start recording")
             waveformBridge.sendState(.error(message: "Failed to start"))
+            return
         }
+
+        // The recorder is live; claim the recording state synchronously (no
+        // await in between) so a release callback observing `isRecording` and
+        // the live mic are always consistent.
+        stateManager.setRecording()
+        recordingStartTime = Date()
+        audioFeedback.playStart()
+        logInfo(
+            "Using \(useAudioKit ? "AudioKit" : "AVAudioEngine") recorder\(fromWakeWord ? " (wake word triggered, auto-stop enabled)" : "")"
+        )
+
+        // Pausing media can suspend the MainActor for hundreds of ms. A stop or
+        // cancel may run during that window; re-check afterwards and, if we are
+        // no longer the active recording, undo the media pause and bail so we
+        // never leave the mic live with a stale FSM.
+        if AppPreferences.shared.pauseMediaDuringRecording {
+            await mediaPlaybackCoordinator.pauseForRecording()
+            guard stateManager.isRecording else {
+                logWarning("Recording superseded during media pause; resuming media")
+                mediaPlaybackCoordinator.resumeAfterRecording()
+                return
+            }
+        }
+
+        waveformBridge.sendState(.recording)
+
+        // Start audio level updates for the floating waveform
+        startAudioLevelUpdates()
+
+        // Start escape key monitor to cancel recording
+        startEscapeMonitor()
     }
 
     /// Cancel recording without transcribing
@@ -320,7 +340,7 @@ final class DictationController: ObservableObject {
         logDebug("Escape monitor started")
     }
 
-    private func stopEscapeMonitor() {
+    func stopEscapeMonitor() {
         if let monitor = escapeMonitor {
             NSEvent.removeMonitor(monitor)
             escapeMonitor = nil
@@ -332,7 +352,7 @@ final class DictationController: ObservableObject {
         audioLevelPublisher.start(isWakeWordTriggered: isWakeWordTriggered)
     }
 
-    private func stopAudioLevelUpdates() {
+    func stopAudioLevelUpdates() {
         audioLevelPublisher.stop()
     }
 
@@ -351,182 +371,6 @@ final class DictationController: ObservableObject {
     func cancelRecordingForExternalControl() {
         cancelRecording()
     }
-
-    /// Shared recording stop/transcription flow used by both UI and external control.
-    /// - Parameter mode: Output behavior after transcription.
-    /// - Returns: Formatted text or a typed control error.
-    private func stopRecordingAndTranscribe(
-        mode: TranscriptionOutputMode
-    ) async -> Result<String, ControlledTranscriptionError> {
-        guard stateManager.isRecording else {
-            logWarning("Cannot stop recording: not recording")
-            return .failure(.notRecording)
-        }
-
-        stopAudioLevelUpdates()
-        // Send zero levels to clear the waveform before the stop sound plays.
-        audioLevelPublisher.clearLevels()
-        stopEscapeMonitor()
-        audioFeedback.playStop()
-
-        let audioSamples = activeRecorder.stopRecording()
-        mediaPlaybackCoordinator.resumeAfterRecording()
-
-        waveformBridge.sendState(.transcribing)
-
-        // Calculate recording duration.
-        let duration: TimeInterval = if let startTime = recordingStartTime {
-            Date().timeIntervalSince(startTime)
-        } else {
-            Double(audioSamples.count) / AppConstants.targetSampleRate
-        }
-        recordingStartTime = nil
-
-        guard !audioSamples.isEmpty else {
-            logWarning("No audio captured")
-            return finalizationCoordinator().failIdle(.noAudioCaptured)
-        }
-
-        // Minimum audio length check — Parakeet needs at least 1 second.
-        guard audioSamples.count >= AppConstants.minTranscriptionSamples else {
-            logInfo(
-                "Audio too short (\(audioSamples.count) samples, need \(AppConstants.minTranscriptionSamples)), ignoring"
-            )
-            return finalizationCoordinator().failIdle(.audioTooShort)
-        }
-
-        stateManager.setTranscribing()
-
-        #if DEBUG
-        saveDebugAudio(audioSamples)
-        #endif
-
-        switch await verifyVoiceIfNeeded(audioSamples: audioSamples) {
-        case .success:
-            break
-        case let .failure(error):
-            return finalizationCoordinator().failIdle(error)
-        }
-
-        do {
-            let rawText = try await transcriber.transcribe(audioSamples)
-            return finishSuccessfulTranscription(rawText: rawText, duration: duration, mode: mode)
-        } catch let error as TranscriberError {
-            logError("Transcription error: \(error)")
-            switch error {
-            case .timeout:
-                waveformBridge.sendState(.error(message: "Timed out"))
-                stateManager.setError("Transcription timed out")
-                return .failure(.transcriptionFailed("Transcription timed out"))
-            case .invalidAudioData:
-                logInfo("Audio too short for transcription")
-                return finalizationCoordinator().failIdle(.audioTooShort)
-            default:
-                waveformBridge.sendState(.error(message: error.localizedDescription))
-                stateManager.setError(error.localizedDescription)
-                return .failure(.transcriptionFailed(error.localizedDescription))
-            }
-        } catch {
-            logError("Error during transcription: \(error)")
-            waveformBridge.sendState(.error(message: error.localizedDescription))
-            stateManager.setError(error.localizedDescription)
-            return .failure(.transcriptionFailed(error.localizedDescription))
-        }
-    }
-
-    /// Perform optional speaker verification before transcription.
-    /// - Parameter audioSamples: Captured microphone audio.
-    /// - Returns: Success when verification passes or is disabled.
-    private func verifyVoiceIfNeeded(audioSamples: [Float]) async -> Result<Void, ControlledTranscriptionError> {
-        guard VoiceVerifier.shared.isEnabled, VoiceVerifier.shared.isEnrolled else {
-            return .success(())
-        }
-
-        do {
-            let verificationResult = try await VoiceVerifier.shared.verify(audioSamples: audioSamples)
-            if !verificationResult.isMatch {
-                logInfo(
-                    "Voice verification failed (similarity: \(String(format: "%.2f", verificationResult.similarity)))"
-                )
-                return .failure(.voiceVerificationFailed)
-            }
-
-            logDebug("Voice verified (similarity: \(String(format: "%.2f", verificationResult.similarity)))")
-            return .success(())
-        } catch {
-            // If verification fails, log but continue with transcription.
-            logWarning("Voice verification error: \(error.localizedDescription)")
-            return .success(())
-        }
-    }
-
-    private func finalizationCoordinator() -> DictationFinalizationCoordinator {
-        DictationFinalizationCoordinator(
-            textFormatter: textFormatter,
-            setIdle: { [stateManager] in stateManager.setIdle() },
-            setError: { [stateManager] message in stateManager.setError(message) },
-            sendState: { [waveformBridge] state in waveformBridge.sendState(state) },
-            saveHistory: { [historyStore] text, duration, modelName in
-                historyStore.save(text: text, duration: duration, modelName: modelName)
-            },
-            insertText: { [textInserter] text in try textInserter.insert(text) }
-        )
-    }
-
-    /// Persist and emit a successful transcription.
-    /// - Parameters:
-    ///   - rawText: Raw text from the speech model.
-    ///   - duration: Recording duration in seconds.
-    ///   - mode: Output behavior after formatting.
-    /// - Returns: Formatted transcription text.
-    private func finishSuccessfulTranscription(
-        rawText: String,
-        duration: TimeInterval,
-        mode: TranscriptionOutputMode
-    ) -> Result<String, ControlledTranscriptionError> {
-        finalizationCoordinator().finishSuccess(
-            rawText: rawText,
-            duration: duration,
-            mode: mode,
-            modelName: modelManager.selectedModel.displayName
-        )
-    }
-
-    #if DEBUG
-    /// Save audio samples to file for debugging, pruning old files.
-    private func saveDebugAudio(_ samples: [Float]) {
-        let debugDir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("hisohiso-debug")
-        try? FileManager.default.createDirectory(at: debugDir, withIntermediateDirectories: true)
-
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-            .replacingOccurrences(of: ":", with: "-")
-        let path = debugDir.appendingPathComponent("\(timestamp).raw")
-
-        let data = samples.withUnsafeBufferPointer { buffer in
-            Data(buffer: buffer)
-        }
-
-        do {
-            try data.write(to: path)
-            logInfo("Debug audio saved to \(path.path) (\(samples.count) samples)")
-            pruneDebugAudio(in: debugDir)
-        } catch {
-            logError("Failed to save debug audio: \(error)")
-        }
-    }
-
-    /// Keep only the most recent debug audio files.
-    private func pruneDebugAudio(in directory: URL) {
-        let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey])
-            .sorted(by: { ($0.lastPathComponent) > ($1.lastPathComponent) })
-        else { return }
-
-        for file in files.dropFirst(AppConstants.maxDebugAudioFiles) {
-            try? fm.removeItem(at: file)
-        }
-    }
-    #endif
 }
 
 extension DictationController: ModelReloading {}
@@ -589,6 +433,7 @@ enum ControlledTranscriptionError: Error, LocalizedError {
     case audioTooShort
     case emptyTranscription
     case voiceVerificationFailed
+    case voiceVerificationError(String)
     case textInsertionFailed(String)
     case transcriptionFailed(String)
 
@@ -604,6 +449,8 @@ enum ControlledTranscriptionError: Error, LocalizedError {
             "No transcription produced"
         case .voiceVerificationFailed:
             "Voice verification failed"
+        case let .voiceVerificationError(message):
+            "Voice verification error: \(message)"
         case let .textInsertionFailed(message):
             "Text insertion failed: \(message)"
         case let .transcriptionFailed(message):

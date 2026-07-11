@@ -72,11 +72,17 @@ final class KeychainManager: @unchecked Sendable {
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
 
-        guard status == errSecSuccess else {
+        switch status {
+        case errSecSuccess:
+            return result as? Data
+        case errSecItemNotFound:
+            return nil
+        default:
+            // Distinguish a locked/inaccessible keychain from a missing key so the
+            // failure is diagnosable. Return type stays Data? for callers.
+            logWarning("Keychain: failed to read key '\(key)': \(status)")
             return nil
         }
-
-        return result as? Data
     }
 
     /// Store data in Keychain
@@ -94,7 +100,7 @@ final class KeychainManager: @unchecked Sendable {
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlocked,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
         ]
 
         let status = SecItemAdd(query as CFDictionary, nil)
@@ -157,7 +163,6 @@ enum KeychainError: Error, LocalizedError {
     case encodingError
     case unableToStore(status: OSStatus)
     case unableToDelete(status: OSStatus)
-    case itemNotFound
 
     var errorDescription: String? {
         switch self {
@@ -167,8 +172,6 @@ enum KeychainError: Error, LocalizedError {
             "Failed to store in Keychain (status: \(status))"
         case let .unableToDelete(status):
             "Failed to delete from Keychain (status: \(status))"
-        case .itemNotFound:
-            "Item not found in Keychain"
         }
     }
 }

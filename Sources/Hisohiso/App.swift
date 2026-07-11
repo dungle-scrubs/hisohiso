@@ -34,8 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var showHistoryOnLaunch = false
     var controlServer: ControlServer?
     private let lifecycleCoordinator = AppLifecycleCoordinator()
-    private let preferences = AppPreferences.shared
-    private var singleInstanceLock: SingleInstanceLock?
+    let preferences = AppPreferences.shared
+    var singleInstanceLock: SingleInstanceLock?
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Handle launch arguments before initializing UI.
         if handleLaunchArguments() {
@@ -73,86 +73,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             setupDictationController()
         }
-    }
-
-    /// Acquire the app-mode singleton guard before installing global monitors.
-    /// - Returns: `true` when this process owns the app instance lock.
-    private func acquireSingleInstanceLock() -> Bool {
-        do {
-            singleInstanceLock = try SingleInstanceLock()
-            return true
-        } catch let SingleInstanceLockError.alreadyRunning(ownerPID) {
-            if isManagedByLaunchd,
-               let ownerPID,
-               terminateExistingInstance(pid: ownerPID),
-               let lock = try? SingleInstanceLock()
-            {
-                singleInstanceLock = lock
-                return true
-            }
-
-            logInfo("Another Hisohiso instance is already running; exiting duplicate launch")
-            return false
-        } catch {
-            logError("Failed to acquire Hisohiso instance lock: \(error.localizedDescription)")
-            return false
-        }
-    }
-
-    /// Prefer the LaunchAgent-owned app process over LaunchServices/manual launches.
-    private func shouldDeferToLaunchdInstance() -> Bool {
-        !isManagedByLaunchd && launchdJobIsLoaded()
-    }
-
-    private var isManagedByLaunchd: Bool {
-        ProcessInfo.processInfo.environment["HISOHISO_MANAGED"] == "launchd"
-    }
-
-    private func launchdJobIsLoaded() -> Bool {
-        runLaunchctl(arguments: ["print", launchdJobTarget()]) == 0
-    }
-
-    private func kickstartLaunchdInstance() {
-        _ = runLaunchctl(arguments: ["kickstart", "-k", launchdJobTarget()])
-    }
-
-    private func launchdJobTarget() -> String {
-        "gui/\(getuid())/com.hisohiso.app"
-    }
-
-    private func runLaunchctl(arguments: [String]) -> Int32 {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        process.arguments = arguments
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus
-        } catch {
-            return 1
-        }
-    }
-
-    private func terminateExistingInstance(pid: Int32) -> Bool {
-        guard pid > 0, pid != ProcessInfo.processInfo.processIdentifier else {
-            return false
-        }
-
-        guard kill(pid, SIGTERM) == 0 else {
-            return false
-        }
-
-        for _ in 0..<20 {
-            usleep(50000)
-            if kill(pid, 0) != 0, errno == ESRCH {
-                return true
-            }
-        }
-
-        return false
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -541,9 +461,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         Task { @MainActor in
-            try? await modelSelectionController.requestSelection(model)
+            do {
+                try await modelSelectionController.requestSelection(model)
+                logInfo("Model selected: \(model.rawValue)")
+            } catch {
+                logError("Model selection failed: \(error)")
+            }
         }
-        logInfo("Model selected: \(model.rawValue)")
     }
 
     #if DEBUG
@@ -599,68 +523,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-    }
-
-    private func showInitializationError(_ error: Error) {
-        let alert = NSAlert()
-        alert.messageText = "Hisohiso Setup Required"
-
-        // Provide specific instructions based on error type
-        if let dictationError = error as? DictationError {
-            switch dictationError {
-            case .accessibilityPermissionDenied:
-                alert.informativeText = """
-                Hisohiso needs Accessibility permission to capture the Globe key and insert text.
-
-                1. Click "Open System Settings"
-                2. Find Hisohiso in the list and enable it
-                3. If not in list, click + and add this app
-                4. Restart Hisohiso
-                """
-            case .microphonePermissionDenied:
-                alert.informativeText = """
-                Hisohiso needs Microphone permission to record audio for transcription.
-
-                Click "Open System Settings" and enable Microphone access.
-                """
-            default:
-                alert.informativeText = error.localizedDescription
-            }
-        } else {
-            alert.informativeText = """
-            Hisohiso encountered an error during setup:
-
-            \(error.localizedDescription)
-
-            Try restarting the app. If the problem persists, check that you have enough disk space for model downloads.
-            """
-        }
-
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Open System Settings")
-        alert.addButton(withTitle: "Quit")
-
-        let response = alert.runModal()
-
-        if response == .alertFirstButtonReturn {
-            // Open directly to Accessibility settings
-            if let dictationError = error as? DictationError {
-                let urlString: String
-                switch dictationError {
-                case .accessibilityPermissionDenied:
-                    urlString = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-                case .microphonePermissionDenied:
-                    urlString = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
-                default:
-                    // For non-permission errors, don't open System Settings
-                    return
-                }
-                if let url = URL(string: urlString) {
-                    NSWorkspace.shared.open(url)
-                }
-            }
-        } else {
-            NSApp.terminate(nil)
-        }
     }
 }
