@@ -69,8 +69,11 @@ final class TextInserter {
 
     /// Insert text using the clipboard and Cmd+V.
     /// Preserves all pasteboard item types and restores only if clipboard has not changed.
-    private func insertViaPaste(_ text: String) {
-        let pasteboard = NSPasteboard.general
+    /// - Parameters:
+    ///   - text: Text to paste.
+    ///   - pasteboard: Pasteboard to round-trip through; injectable so tests can
+    ///     exercise the snapshot/restore path without touching the user's clipboard.
+    private func insertViaPaste(_ text: String, pasteboard: NSPasteboard = .general) {
         let snapshot = Self.snapshotPasteboard(pasteboard)
 
         pasteboard.clearContents()
@@ -85,22 +88,26 @@ final class TextInserter {
         // Simulate Cmd+V
         simulateCommandV()
 
+        // NSPasteboard is not Sendable, so box it for the delayed main-queue closure.
+        // Safe: the closure runs on the main queue and only touches the pasteboard there.
+        let boxedPasteboard = UncheckedSendableBox(value: pasteboard)
+
         // Restore clipboard after a delay, but only if user/app did not change it.
         // 500ms gives slow apps (Electron, browsers with extensions) time to process Cmd+V.
         // Tradeoff: user's original clipboard is unavailable for 500ms after dictation.
         DispatchQueue.main.asyncAfter(deadline: .now() + AppConstants.pasteRestoreDelay) {
-            let currentPasteboard = NSPasteboard.general
-            guard currentPasteboard.changeCount == expectedChangeCount else {
+            let pasteboard = boxedPasteboard.value
+            guard pasteboard.changeCount == expectedChangeCount else {
                 return
             }
-            Self.restorePasteboard(snapshot, to: currentPasteboard)
+            Self.restorePasteboard(snapshot, to: pasteboard)
         }
     }
 
     /// Snapshot all pasteboard items and data representations.
     /// - Parameter pasteboard: Pasteboard to snapshot.
     /// - Returns: Serialized items keyed by pasteboard type.
-    private static func snapshotPasteboard(_ pasteboard: NSPasteboard) -> [[NSPasteboard.PasteboardType: Data]] {
+    static func snapshotPasteboard(_ pasteboard: NSPasteboard = .general) -> [[NSPasteboard.PasteboardType: Data]] {
         guard let items = pasteboard.pasteboardItems else { return [] }
 
         return items.map { item in
@@ -118,9 +125,9 @@ final class TextInserter {
     /// - Parameters:
     ///   - snapshot: Snapshot captured by `snapshotPasteboard`.
     ///   - pasteboard: Pasteboard to restore.
-    private static func restorePasteboard(
+    static func restorePasteboard(
         _ snapshot: [[NSPasteboard.PasteboardType: Data]],
-        to pasteboard: NSPasteboard
+        to pasteboard: NSPasteboard = .general
     ) {
         pasteboard.clearContents()
         guard !snapshot.isEmpty else { return }

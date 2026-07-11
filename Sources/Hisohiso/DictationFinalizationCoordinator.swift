@@ -33,6 +33,14 @@ struct DictationFinalizationCoordinator {
 
         let formattedText = textFormatter.format(rawText)
         logInfo("Formatted: '\(rawText)' → '\(formattedText)'")
+
+        // An all-filler utterance can format down to an empty string. Do not
+        // persist a blank history row or report success — fail idle instead.
+        guard !formattedText.isEmpty else {
+            logInfo("Formatted transcription is empty; treating as empty transcription")
+            return failIdle(.emptyTranscription)
+        }
+
         saveHistory(formattedText, duration, modelName)
 
         if mode == .insertAtCursor {

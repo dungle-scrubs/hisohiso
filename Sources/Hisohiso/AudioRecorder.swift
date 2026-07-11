@@ -2,6 +2,7 @@ import Accelerate
 import AVFoundation
 import CoreAudio
 import Foundation
+import os
 
 /// Represents an audio input device
 struct AudioInputDevice: Identifiable, Equatable, Hashable {
@@ -27,6 +28,7 @@ enum AudioRecorderError: Error, LocalizedError {
     case noInputNode
     case permissionDenied
     case notRecording
+    case alreadyRecording
     case deviceNotFound
 
     var errorDescription: String? {
@@ -39,6 +41,8 @@ enum AudioRecorderError: Error, LocalizedError {
             "Microphone permission denied"
         case .notRecording:
             "Not currently recording"
+        case .alreadyRecording:
+            "Audio recorder is already capturing"
         case .deviceNotFound:
             "Selected audio device not found"
         }
@@ -68,8 +72,22 @@ final class AudioRecorder: @unchecked Sendable, AudioRecording {
     /// Currently selected device (nil = system default)
     private var selectedDeviceUID: String?
 
-    /// Called continuously with audio samples when monitoring (for wake word detection)
-    var onMonitoringSamples: ((_ samples: [Float], _ sampleRate: Double) -> Void)?
+    /// Handler delivered continuous audio samples during monitoring (for wake word detection).
+    typealias MonitoringSamplesHandler = (_ samples: [Float], _ sampleRate: Double) -> Void
+
+    /// Backing store for `onMonitoringSamples`, protected by an unfair lock.
+    ///
+    /// The handler is written from the MainActor (`setMonitoringSamplesHandler`)
+    /// and read on the audio render thread inside `processMonitoringBuffer`, so
+    /// the pointer read/write must be synchronized. Mirrors `HistoryHotkeyMonitor`.
+    /// The handler itself is not `Sendable`, so this uses the unchecked variant.
+    private let monitoringSamplesLock = os.OSAllocatedUnfairLock<MonitoringSamplesHandler?>(uncheckedState: nil)
+
+    /// Called continuously with audio samples when monitoring (for wake word detection).
+    var onMonitoringSamples: MonitoringSamplesHandler? {
+        get { monitoringSamplesLock.withLockUnchecked { $0 } }
+        set { monitoringSamplesLock.withLockUnchecked { $0 = newValue } }
+    }
 
     init() {
         // Load persisted device selection
@@ -262,8 +280,8 @@ final class AudioRecorder: @unchecked Sendable, AudioRecording {
 
         let currentState = state
         guard currentState == .idle || currentState == .monitoring else {
-            logWarning("Already recording, returning early")
-            return
+            logWarning("Cannot start recording: recorder is busy (state: \(currentState))")
+            throw AudioRecorderError.alreadyRecording
         }
 
         // Stop monitoring if active (can't have two taps on same node)
@@ -442,8 +460,10 @@ final class AudioRecorder: @unchecked Sendable, AudioRecording {
         let frameCount = Int(buffer.frameLength)
         let samples = Array(UnsafeBufferPointer(start: channelData[0], count: frameCount))
 
-        // Send to callback
-        onMonitoringSamples?(samples, sampleRate)
+        // Copy the handler out under the lock, then invoke it outside the lock
+        // so the render thread never holds the lock across the callback.
+        let handler = monitoringSamplesLock.withLockUnchecked { $0 }
+        handler?(samples, sampleRate)
     }
 
     /// Get the most recent audio samples from the recording buffer.

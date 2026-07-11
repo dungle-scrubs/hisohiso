@@ -113,21 +113,31 @@ extension AppDelegate {
     /// - Returns: Process exit code.
     private func runControlCommand(_ command: CLIControlCommand) -> Int32 {
         let request: ControlRequest
+        let timeout: TimeInterval
         switch command {
         case .ping:
             request = ControlRequest.make(method: .ping)
+            timeout = 2.0
         case .status:
             request = ControlRequest.make(method: .status)
+            timeout = 2.0
         case let .start(model):
             let params = ControlRequestParams(model: model?.rawValue)
             request = ControlRequest.make(method: .start, params: params)
+            // A model override may trigger a download/load before recording starts.
+            timeout = model == nil
+                ? AppConstants.transcriptionTimeout + 60
+                : 300
         case .stop:
             request = ControlRequest.make(method: .stop)
+            // `stop` runs full transcription, up to `transcriptionTimeout`.
+            timeout = AppConstants.transcriptionTimeout + 60
         case .cancel:
             request = ControlRequest.make(method: .cancel)
+            timeout = 2.0
         }
 
-        switch ControlSocketClient.send(request: request) {
+        switch ControlSocketClient.send(request: request, timeout: timeout) {
         case let .success(response):
             printControlResponse(response)
             return response.ok ? 0 : 1

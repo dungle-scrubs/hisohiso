@@ -45,6 +45,11 @@ final class HistoryStore {
 
     private static let schema = Schema([TranscriptionRecord.self])
 
+    /// Retention policy: keep at most this many records, and none older than
+    /// `retentionDays`. Enforced on every save() to bound store growth.
+    private static let maxRecords = 1000
+    private static let retentionDays = 90
+
     private let container: ModelContainer?
     private let context: ModelContext?
 
@@ -100,12 +105,46 @@ final class HistoryStore {
         context.insert(record)
 
         do {
+            try pruneOldRecords(context: context)
             try context.save()
-            logInfo("Saved transcription to history: \(text.prefix(50))...")
+            logInfo("Saved transcription to history (length: \(text.count))")
             return record
         } catch {
             logError("Failed to save transcription: \(error)")
             return nil
+        }
+    }
+
+    /// Enforce the retention policy: drop records older than `retentionDays`,
+    /// then cap the store at the newest `maxRecords` records. Does not save;
+    /// the caller persists the pending changes.
+    private func pruneOldRecords(context: ModelContext) throws {
+        let cutoff = Calendar.current.date(
+            byAdding: .day, value: -Self.retentionDays, to: Date()
+        ) ?? Date.distantPast
+
+        // Sort/predicate are done in Swift rather than via SwiftData
+        // SortDescriptor/#Predicate: those emit KeyPath-not-Sendable warnings
+        // under StrictConcurrency, and the retention cap keeps the fetched set
+        // small (<= maxRecords + recent inserts), so the in-memory pass is cheap.
+        let all = try context.fetch(FetchDescriptor<TranscriptionRecord>())
+
+        var survivors: [TranscriptionRecord] = []
+        survivors.reserveCapacity(all.count)
+        for record in all {
+            if record.timestamp < cutoff {
+                context.delete(record)
+            } else {
+                survivors.append(record)
+            }
+        }
+
+        guard survivors.count > Self.maxRecords else { return }
+        let excess = survivors
+            .sorted { $0.timestamp > $1.timestamp }
+            .dropFirst(Self.maxRecords)
+        for record in excess {
+            context.delete(record)
         }
     }
 
@@ -115,10 +154,8 @@ final class HistoryStore {
     func recent(limit: Int = 50) -> [TranscriptionRecord] {
         guard let context else { return [] }
 
-        let descriptor = FetchDescriptor<TranscriptionRecord>()
-
         do {
-            return Array(try context.fetch(descriptor)
+            return Array(try context.fetch(FetchDescriptor<TranscriptionRecord>())
                 .sorted { $0.timestamp > $1.timestamp }
                 .prefix(limit))
         } catch {
@@ -128,8 +165,10 @@ final class HistoryStore {
     }
 
     /// Search transcriptions with fuzzy matching.
-    /// Falls back to in-memory fuzzy matching (last 6 months, max 500 records) if
-    /// the predicate-based substring search finds no results.
+    /// Exact substring matches (newest first) are returned when present;
+    /// otherwise falls back to in-memory fuzzy matching ranked by relevance.
+    /// The retention cap bounds the fetched set, so matching runs in Swift
+    /// (no SwiftData #Predicate/SortDescriptor, which warn under StrictConcurrency).
     /// - Parameter query: Search query string. Empty returns recent records.
     /// - Returns: Matching transcription records ranked by relevance.
     func search(query: String) -> [TranscriptionRecord] {
@@ -142,20 +181,16 @@ final class HistoryStore {
 
         do {
             let records = try context.fetch(FetchDescriptor<TranscriptionRecord>())
-            let exactMatches = records
-                .filter { $0.text.localizedStandardContains(query) }
                 .sorted { $0.timestamp > $1.timestamp }
-                .prefix(50)
 
+            let exactMatches = Array(records
+                .filter { $0.text.localizedStandardContains(query) }
+                .prefix(50))
             if !exactMatches.isEmpty {
-                return Array(exactMatches)
+                return exactMatches
             }
 
-            let sixMonthsAgo = Calendar.current.date(byAdding: .month, value: -6, to: Date()) ?? Date.distantPast
             return records
-                .filter { $0.timestamp >= sixMonthsAgo }
-                .sorted { $0.timestamp > $1.timestamp }
-                .prefix(500)
                 .map { record -> (record: TranscriptionRecord, score: Int) in
                     let score = fuzzyMatchScore(text: record.text.lowercased(), query: lowercasedQuery)
                     return (record, score)

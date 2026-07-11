@@ -183,10 +183,11 @@ final class WakeWordManager: ObservableObject {
 
             guard !text.isEmpty else { return }
 
-            logInfo("WakeWordManager: Heard '\(text)' (looking for '\(wakePhrase)')")
+            // Never log the heard transcript text; only whether it matched and its length.
+            let matched = containsWakePhrase(text)
+            logInfo("WakeWordManager: Heard transcript (length: \(text.count), match: \(matched))")
 
-            // Check if transcription contains wake phrase
-            if containsWakePhrase(text) {
+            if matched {
                 logInfo("WakeWordManager: Wake phrase detected!")
                 await MainActor.run {
                     self.onWakeWordDetected?()

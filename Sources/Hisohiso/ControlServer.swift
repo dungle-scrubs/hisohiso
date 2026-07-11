@@ -78,6 +78,13 @@ final class ControlServer: @unchecked Sendable {
                     throw ControlServerError.bindFailed(message)
                 }
 
+                // Restrict the socket to the owning user only (rw-------) so no
+                // other local user can connect to it.
+                if chmod(socketPath, 0o600) != 0 {
+                    let message = String(cString: strerror(errno))
+                    throw ControlServerError.bindFailed(message)
+                }
+
                 guard Darwin.listen(fd, 8) == 0 else {
                     let message = String(cString: strerror(errno))
                     throw ControlServerError.listenFailed(message)
@@ -124,8 +131,37 @@ final class ControlServer: @unchecked Sendable {
                 break
             }
 
+            guard Self.isAuthorizedPeer(clientFD) else {
+                logError("Control server rejected connection from unauthorized peer")
+                Darwin.close(clientFD)
+                continue
+            }
+
+            // Prevent a write to a peer that already closed from raising
+            // SIGPIPE and terminating the process.
+            var disableSigPipe: Int32 = 1
+            _ = setsockopt(
+                clientFD,
+                SOL_SOCKET,
+                SO_NOSIGPIPE,
+                &disableSigPipe,
+                socklen_t(MemoryLayout<Int32>.size)
+            )
+
             handleClient(clientFD)
         }
+    }
+
+    /// Verify that a connected peer runs as the same effective user as this process.
+    /// - Parameter clientFD: Accepted client file descriptor.
+    /// - Returns: `true` when the peer's effective uid matches ours.
+    private static func isAuthorizedPeer(_ clientFD: Int32) -> Bool {
+        var peerUID: uid_t = 0
+        var peerGID: gid_t = 0
+        guard getpeereid(clientFD, &peerUID, &peerGID) == 0 else {
+            return false
+        }
+        return peerUID == geteuid()
     }
 
     /// Read one request from a client and write one response.

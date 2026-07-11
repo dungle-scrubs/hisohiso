@@ -162,8 +162,11 @@ actor Transcriber {
     func initialize(model: TranscriptionModel = .defaultModel) async throws {
         logInfo("Initializing transcriber with model: \(model.rawValue) (backend: \(model.backend.rawValue))")
 
-        // Reset previous state
+        // Reset previous state, releasing CoreML models deterministically
+        // before dropping the references so memory is reclaimed promptly.
+        await whisperKit?.unloadModels()
         whisperKit = nil
+        asrManager?.cleanup()
         asrManager = nil
 
         switch model.backend {
@@ -329,39 +332,28 @@ actor Transcriber {
         }
 
         let kitBox = UncheckedSendableBox(value: whisperKit)
-        let timeout = timeoutSeconds
+        let startTime = Date()
 
-        return try await withThrowingTaskGroup(of: String.self) { group in
-            group.addTask {
-                // Noise-optimized decode options:
-                // - usePrefillPrompt=false prevents hallucination loops from prior context
-                // - suppressBlank=true suppresses empty/blank tokens on noise-only segments
-                // - compressionRatioThreshold detects repetitive hallucinations
-                // - noSpeechThreshold detects silence/noise-only segments
-                let options = DecodingOptions(
-                    usePrefillPrompt: false,
-                    usePrefillCache: false,
-                    suppressBlank: true,
-                    compressionRatioThreshold: 2.4,
-                    noSpeechThreshold: 0.6
-                )
-                let results = try await kitBox.value.transcribe(audioArray: audioSamples, decodeOptions: options)
-                return results.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespaces)
-            }
-
-            group.addTask {
-                try await Task.sleep(for: .seconds(timeout))
-                throw TranscriberError.timeout
-            }
-
-            guard let result = try await group.next() else {
-                throw TranscriberError.transcriptionFailed(NSError(domain: "Transcriber", code: -1))
-            }
-
-            group.cancelAll()
-            logInfo("Whisper transcription complete: \(result.prefix(50))...")
-            return result
+        let text = try await raceAgainstTimeout {
+            // Noise-optimized decode options:
+            // - usePrefillPrompt=false prevents hallucination loops from prior context
+            // - suppressBlank=true suppresses empty/blank tokens on noise-only segments
+            // - compressionRatioThreshold detects repetitive hallucinations
+            // - noSpeechThreshold detects silence/noise-only segments
+            let options = DecodingOptions(
+                usePrefillPrompt: false,
+                usePrefillCache: false,
+                suppressBlank: true,
+                compressionRatioThreshold: 2.4,
+                noSpeechThreshold: 0.6
+            )
+            let results = try await kitBox.value.transcribe(audioArray: audioSamples, decodeOptions: options)
+            return results.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespaces)
         }
+
+        let ms = Int(Date().timeIntervalSince(startTime) * 1000)
+        logInfo("Whisper transcription complete: \(text.count) chars in \(ms)ms")
+        return text
     }
 
     private func transcribeWithParakeet(_ audioSamples: [Float]) async throws -> String {
@@ -375,26 +367,51 @@ actor Transcriber {
         }
 
         let asrManagerBox = UncheckedSendableBox(value: asrManager)
+        let startTime = Date()
+
+        let text = try await raceAgainstTimeout {
+            let result = try await asrManagerBox.value.transcribe(audioSamples, source: .microphone)
+            return result.text.trimmingCharacters(in: .whitespaces)
+        }
+
+        let ms = Int(Date().timeIntervalSince(startTime) * 1000)
+        logInfo("Parakeet transcription complete: \(text.count) chars in \(ms)ms")
+        return text
+    }
+
+    /// Runs a transcription `operation` in a detached task and races it against
+    /// the configured timeout. Whichever finishes first wins; the losing task
+    /// is cancelled but a stuck inference is left to finish detached so the
+    /// caller returns/throws promptly and the timeout actually bounds the wait.
+    /// Throws `TranscriberError.timeout` when the timeout wins.
+    private func raceAgainstTimeout(
+        _ operation: @escaping @Sendable () async throws -> String
+    ) async throws -> String {
+        let gate = TranscriptionRaceGate()
         let timeout = timeoutSeconds
 
-        return try await withThrowingTaskGroup(of: String.self) { group in
-            group.addTask {
-                let result = try await asrManagerBox.value.transcribe(audioSamples, source: .microphone)
-                return result.text.trimmingCharacters(in: .whitespaces)
+        let work = Task.detached {
+            do {
+                await gate.settle(.success(try await operation()))
+            } catch {
+                await gate.settle(.failure(UncheckedSendableBox(value: error)))
             }
+        }
+        let timer = Task.detached {
+            try? await Task.sleep(for: .seconds(timeout))
+            await gate.settle(.failure(UncheckedSendableBox(value: TranscriberError.timeout)))
+        }
 
-            group.addTask {
-                try await Task.sleep(for: .seconds(timeout))
-                throw TranscriberError.timeout
-            }
+        let outcome = await gate.wait()
+        // Cancel both; the winner is already done, and a stuck loser detaches.
+        timer.cancel()
+        work.cancel()
 
-            guard let result = try await group.next() else {
-                throw TranscriberError.transcriptionFailed(NSError(domain: "Transcriber", code: -1))
-            }
-
-            group.cancelAll()
-            logInfo("Parakeet transcription complete: \(result.prefix(50))...")
-            return result
+        switch outcome {
+        case let .success(text):
+            return text
+        case let .failure(box):
+            throw box.value
         }
     }
 
@@ -406,5 +423,40 @@ actor Transcriber {
     /// Current model being used
     var model: TranscriptionModel? {
         currentModel
+    }
+}
+
+// MARK: - Transcription Race Gate
+
+/// First-result-wins outcome for a transcription/timeout race. The error case
+/// is boxed so an arbitrary `Error` can cross into the gate actor safely.
+private enum TranscriptionOutcome: Sendable {
+    case success(String)
+    case failure(UncheckedSendableBox<Error>)
+}
+
+/// Single-fire gate that records whichever of two racing tasks (inference or
+/// timeout) settles first and hands the result to a single waiter. Later
+/// settle calls are ignored, so a slow loser can finish detached harmlessly.
+private actor TranscriptionRaceGate {
+    private var outcome: TranscriptionOutcome?
+    private var waiter: CheckedContinuation<TranscriptionOutcome, Never>?
+
+    func settle(_ result: TranscriptionOutcome) {
+        guard outcome == nil else { return }
+        outcome = result
+        if let waiter {
+            self.waiter = nil
+            waiter.resume(returning: result)
+        }
+    }
+
+    func wait() async -> TranscriptionOutcome {
+        if let outcome {
+            return outcome
+        }
+        return await withCheckedContinuation { continuation in
+            waiter = continuation
+        }
     }
 }
