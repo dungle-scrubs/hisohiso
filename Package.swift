@@ -10,7 +10,7 @@ let package = Package(
         .executable(name: "Hisohiso", targets: ["Hisohiso"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/argmaxinc/WhisperKit", from: "0.9.0"),
+        .package(url: "https://github.com/argmaxinc/WhisperKit", from: "1.1.0"),
         .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.7.9"),
         .package(url: "https://github.com/AudioKit/AudioKit.git", from: "5.6.0"),
     ],
