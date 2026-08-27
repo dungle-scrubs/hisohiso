@@ -108,6 +108,15 @@ final class VoiceEnrollmentController {
         )
     }
 
+    /// Wait for the in-flight enrollment, if any, to settle into `.completed` or `.failed`.
+    ///
+    /// `status` moves to its final value on the enrollment task after the verifier
+    /// returns, so observers that only wait for the verifier call can still see
+    /// `.processing`. Awaiting this closes that gap.
+    func awaitEnrollment() async {
+        await enrollmentTask?.value
+    }
+
     private func finishEnrollment(sessionID: Int) {
         guard !enrollmentSamples.isEmpty else {
             logWarning("VoiceEnrollmentController.finish failed session=\(sessionID) reason=noAudioCaptured")
@@ -136,7 +145,9 @@ final class VoiceEnrollmentController {
                     return
                 }
                 self?.enrollmentTask = nil
-                logError("VoiceEnrollmentController.finish failed session=\(sessionID) error=\(error.localizedDescription)")
+                logError(
+                    "VoiceEnrollmentController.finish failed session=\(sessionID) error=\(error.localizedDescription)"
+                )
                 self?.status = .failed(.enrollmentFailed(error.localizedDescription))
             }
         }

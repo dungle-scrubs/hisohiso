@@ -5,7 +5,7 @@ import os
 // MARK: - KeyCombo
 
 /// Represents a keyboard shortcut combination
-struct KeyCombo: Codable, Equatable, Sendable {
+struct KeyCombo: Codable, Equatable {
     /// Virtual key code (e.g., kVK_Space = 49)
     let keyCode: UInt32
 
@@ -82,6 +82,7 @@ struct KeyCombo: Codable, Equatable, Sendable {
 /// Uses the shared `EventTapManager` instead of creating its own CGEventTap.
 /// The hotkey configuration is stored in a lock-protected field so the event tap
 /// callback (which runs on an arbitrary thread) can read it safely.
+/// Tap versus hold is decided by `PressGestureDetector`, shared with `GlobeKeyMonitor`.
 @MainActor
 final class HotkeyManager: ObservableObject {
     private static let registrationID = "hotkey-manager"
@@ -94,13 +95,25 @@ final class HotkeyManager: ObservableObject {
     /// the hotkey synchronously to decide whether to consume the event.
     private let hotkeyLock: os.OSAllocatedUnfairLock<KeyCombo?>
 
-    /// Callback when hotkey is pressed
-    var onHotkeyDown: (() -> Void)?
+    private let gesture = PressGestureDetector()
 
-    /// Callback when hotkey is released
-    var onHotkeyUp: (() -> Void)?
+    /// Called when the hotkey is tapped (quick press and release)
+    var onHotkeyTap: (@MainActor () -> Void)? {
+        get { gesture.onTap }
+        set { gesture.onTap = newValue }
+    }
 
-    private var isHotkeyPressed = false
+    /// Called when the hotkey is held down (long press)
+    var onHotkeyHoldStart: (@MainActor () -> Void)? {
+        get { gesture.onHoldStart }
+        set { gesture.onHoldStart = newValue }
+    }
+
+    /// Called when the hotkey is released after being held
+    var onHotkeyHoldEnd: (@MainActor () -> Void)? {
+        get { gesture.onHoldEnd }
+        set { gesture.onHoldEnd = newValue }
+    }
 
     init() {
         hotkeyLock = os.OSAllocatedUnfairLock(initialState: nil)
@@ -155,7 +168,7 @@ final class HotkeyManager: ObservableObject {
     /// Stop monitoring
     func stop() {
         EventTapManager.shared.unregister(id: Self.registrationID)
-        isHotkeyPressed = false
+        gesture.reset()
         logInfo("HotkeyManager stopped")
     }
 
@@ -174,10 +187,9 @@ final class HotkeyManager: ObservableObject {
         // have already released one or more modifiers before the main key of the
         // chord (e.g. releasing Ctrl before Space in Ctrl+Option+Space), so the
         // live flags no longer match the configured combo. Matching the tracked
-        // keyCode alone on key-UP lets us clear the pressed state and fire
-        // onHotkeyUp regardless of the current flags. Without this, releasing a
-        // modifier first would leave isHotkeyPressed stuck true and recording
-        // would never stop via the hotkey.
+        // keyCode alone on key-UP lets us release the gesture regardless of the
+        // current flags. Without this, releasing a modifier first would leave the
+        // detector stuck pressed and recording would never stop via the hotkey.
         if isDown {
             let currentModifiers = KeyCombo(keyCode: keyCode, flags: event.flags).modifiers
             guard currentModifiers == hotkey.modifiers else { return false }
@@ -186,14 +198,14 @@ final class HotkeyManager: ObservableObject {
         Task { @MainActor [weak self] in
             guard let self else { return }
 
-            if isDown, !isHotkeyPressed {
-                isHotkeyPressed = true
+            // Key-down auto-repeats while held; the detector ignores presses
+            // that arrive without an intervening release.
+            if isDown, !gesture.isPressed {
                 logDebug("Alternative hotkey pressed: \(hotkey.displayString)")
-                onHotkeyDown?()
-            } else if !isDown, isHotkeyPressed {
-                isHotkeyPressed = false
+                gesture.press()
+            } else if !isDown, gesture.isPressed {
                 logDebug("Alternative hotkey released: \(hotkey.displayString)")
-                onHotkeyUp?()
+                gesture.release()
             }
         }
 
@@ -343,7 +355,10 @@ final class HotkeyRecorderView: NSView {
         let hasModifier = flags.contains(.command) || flags.contains(.option) ||
             flags.contains(.control) || flags.contains(.shift)
 
-        guard hasModifier else { return }
+        // A bare key is accepted only when it is a function key. The hotkey
+        // consumes its key events system-wide, so a bare letter or number
+        // would silently stop typing that character everywhere.
+        guard hasModifier || KeyCodeUtils.isFunctionKey(event.keyCode) else { return }
 
         var modifiers: UInt32 = 0
         if flags.contains(.command) { modifiers |= UInt32(cmdKey) }
