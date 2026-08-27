@@ -66,9 +66,9 @@ private class WaveformView: NSView {
         CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
 
         for (i, bar) in barLayers.enumerated() {
+            // Levels arrive already compressed to 0-100 by AudioLevelPublisher.
             let rawLevel = i < levels.count ? CGFloat(levels[i]) : 0
-            // Amplify 5x, cap at 100
-            let level = min(rawLevel * 5.0, 100.0) / 100.0
+            let level = min(rawLevel, 100.0) / 100.0
             let height = minBarHeight + (maxBarHeight - minBarHeight) * level
             let y = (bounds.height - height) / 2
 
