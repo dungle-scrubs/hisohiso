@@ -15,6 +15,7 @@ final class VoiceEnrollmentControllerTests: XCTestCase {
         controller.start()
         controller.stop()
         await verifier.waitForEnrollment()
+        await controller.awaitEnrollment()
 
         XCTAssertEqual(recorder.startCount, 1)
         XCTAssertEqual(recorder.stopCount, 1)
@@ -22,7 +23,7 @@ final class VoiceEnrollmentControllerTests: XCTestCase {
         XCTAssertEqual(controller.status, .completed)
     }
 
-    func testDebugInfoSnapshotsEnrollmentState() async {
+    func testDebugInfoSnapshotsEnrollmentState() {
         let verifier = SuspendedVoiceEnrollmentVerifier()
         let recorder = StubAudioRecording(samples: [validSample()])
         let controller = VoiceEnrollmentController(
@@ -74,7 +75,7 @@ final class VoiceEnrollmentControllerTests: XCTestCase {
         XCTAssertEqual(controller.debugInfo().capturedSampleCount, 0)
     }
 
-    func testAutomaticCompletionDoesNotStopRecorderTwice() async throws {
+    func testAutomaticCompletionDoesNotStopRecorderTwice() async {
         let verifier = RecordingVoiceEnrollmentVerifier()
         let recorder = StubAudioRecording(samples: [validSample(), validSample(), validSample()])
         let controller = VoiceEnrollmentController(
@@ -85,6 +86,7 @@ final class VoiceEnrollmentControllerTests: XCTestCase {
 
         controller.start()
         await verifier.waitForEnrollment()
+        await controller.awaitEnrollment()
 
         XCTAssertEqual(recorder.startCount, 3)
         XCTAssertEqual(recorder.stopCount, 3)
