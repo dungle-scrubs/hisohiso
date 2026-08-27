@@ -46,6 +46,21 @@ final class KeyComboTests: XCTestCase {
 
         let f12 = KeyCombo(keyCode: UInt32(kVK_F12), modifiers: UInt32(cmdKey))
         XCTAssertEqual(f12.displayString, "⌘F12")
+
+        let f13 = KeyCombo(keyCode: UInt32(kVK_F13), modifiers: 0)
+        XCTAssertEqual(f13.displayString, "F13")
+
+        let f20 = KeyCombo(keyCode: UInt32(kVK_F20), modifiers: 0)
+        XCTAssertEqual(f20.displayString, "F20")
+    }
+
+    func testIsFunctionKey() {
+        XCTAssertTrue(KeyCodeUtils.isFunctionKey(UInt16(kVK_F1)))
+        XCTAssertTrue(KeyCodeUtils.isFunctionKey(UInt16(kVK_F13)))
+        XCTAssertTrue(KeyCodeUtils.isFunctionKey(UInt16(kVK_F20)))
+        XCTAssertFalse(KeyCodeUtils.isFunctionKey(UInt16(kVK_Space)))
+        XCTAssertFalse(KeyCodeUtils.isFunctionKey(UInt16(kVK_ANSI_A)))
+        XCTAssertFalse(KeyCodeUtils.isFunctionKey(UInt16(kVK_Escape)))
     }
 
     func testDisplayStringArrowKeys() {

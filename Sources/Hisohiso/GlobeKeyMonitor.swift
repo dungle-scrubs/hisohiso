@@ -1,32 +1,37 @@
+@preconcurrency import ApplicationServices
 import Cocoa
 import CoreGraphics
-@preconcurrency import ApplicationServices
 
 /// Monitors the Globe/Fn key using the shared EventTapManager and NSEvent fallback.
 ///
 /// The Globe key on macOS is detected via `.maskSecondaryFn` flag (0x800000) in CGEventFlags.
 /// We also use NSEvent.addGlobalMonitorForEvents as a backup.
+/// Tap versus hold is decided by `PressGestureDetector`, shared with `HotkeyManager`.
 /// Requires Accessibility permission to function.
 @MainActor
 final class GlobeKeyMonitor {
     private static let registrationID = "globe-key-monitor"
 
     private var nsEventMonitor: Any?
-    private var isGlobePressed = false
+    private let gesture = PressGestureDetector()
 
     /// Called when Globe key is tapped (quick press and release)
-    var onGlobeTap: (@MainActor () -> Void)?
+    var onGlobeTap: (@MainActor () -> Void)? {
+        get { gesture.onTap }
+        set { gesture.onTap = newValue }
+    }
 
     /// Called when Globe key is held down (long press)
-    var onGlobeHoldStart: (@MainActor () -> Void)?
+    var onGlobeHoldStart: (@MainActor () -> Void)? {
+        get { gesture.onHoldStart }
+        set { gesture.onHoldStart = newValue }
+    }
 
     /// Called when Globe key is released after being held
-    var onGlobeHoldEnd: (@MainActor () -> Void)?
-
-    /// Threshold to distinguish tap from hold (in seconds)
-    private let holdThreshold: TimeInterval = AppConstants.globeHoldThreshold
-    private var pressTime: Date?
-    private var isHolding = false
+    var onGlobeHoldEnd: (@MainActor () -> Void)? {
+        get { gesture.onHoldEnd }
+        set { gesture.onHoldEnd = newValue }
+    }
 
     deinit {
         MainActor.assumeIsolated {
@@ -79,36 +84,17 @@ final class GlobeKeyMonitor {
             NSEvent.removeMonitor(monitor)
             nsEventMonitor = nil
         }
+        gesture.reset()
         logInfo("GlobeKeyMonitor stopped")
     }
 
     private func handleGlobeState(pressed: Bool, source: String) {
-        if pressed, !isGlobePressed {
-            isGlobePressed = true
-            pressTime = Date()
-            isHolding = false
+        if pressed, !gesture.isPressed {
             logDebug("Globe key down (via \(source))")
-
-            // Schedule hold detection
-            DispatchQueue.main.asyncAfter(deadline: .now() + holdThreshold) { [weak self] in
-                guard let self, isGlobePressed, !self.isHolding else { return }
-                isHolding = true
-                logInfo("Globe key hold started")
-                onGlobeHoldStart?()
-            }
-        } else if !pressed, isGlobePressed {
-            isGlobePressed = false
-            let pressDuration = pressTime.map { Date().timeIntervalSince($0) } ?? 0
-
-            if isHolding {
-                logInfo("Globe key hold ended (held \(String(format: "%.2f", pressDuration))s)")
-                isHolding = false
-                onGlobeHoldEnd?()
-            } else {
-                logInfo("Globe key tapped (via \(source))")
-                onGlobeTap?()
-            }
-            pressTime = nil
+            gesture.press()
+        } else if !pressed, gesture.isPressed {
+            logDebug("Globe key up (via \(source))")
+            gesture.release()
         }
     }
 

@@ -53,7 +53,7 @@ final class HotkeyPreferencesTab: NSView {
 
         let dictationHint =
             NSTextField(
-                wrappingLabelWithString: "Hold the hotkey to record, release to transcribe. Click the field above and press your desired key combination, or press Escape to clear."
+                wrappingLabelWithString: "Works like the Globe key: tap to start or stop, hold to record until release. Click the field above and press a key combination or a single function key (F1-F20), or press Escape to clear."
             )
         dictationHint.frame = NSRect(x: 20, y: y - 40, width: 420, height: 50)
         dictationHint.font = .systemFont(ofSize: 11)
