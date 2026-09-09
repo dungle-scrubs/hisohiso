@@ -96,6 +96,9 @@ SIGN_IDENTITY="${HISOHISO_CODESIGN_IDENTITY:-Hisohiso Local Signing}"
 CODESIGN_ARGS=()
 if security find-identity -p codesigning "${SIGNING_KEYCHAIN}" 2>/dev/null | grep -qF "${SIGN_IDENTITY}"; then
   echo "Signing with stable identity: ${SIGN_IDENTITY}"
+  # The keychain re-locks on sleep; unlock (documented non-secret password,
+  # see scripts/create-signing-cert.sh) so unattended builds keep signing.
+  security unlock-keychain -p hisohiso-local "${SIGNING_KEYCHAIN}" 2>/dev/null || true
   CODESIGN_ARGS=(--sign "${SIGN_IDENTITY}" --keychain "${SIGNING_KEYCHAIN}")
 else
   echo "WARNING: signing identity '${SIGN_IDENTITY}' not found; falling back to ad-hoc." >&2
