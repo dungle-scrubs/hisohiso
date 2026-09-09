@@ -176,23 +176,23 @@ final class DictationController: ObservableObject {
     private func setupCallbacks() {
         logInfo("Setting up callbacks...")
 
-        // Tap: toggle recording on/off
-        globeMonitor.onGlobeTap = { [weak self] in
+        // The Globe key and the alternative hotkey share one gesture vocabulary:
+        // tap toggles, hold records until release.
+        let tap: @MainActor () -> Void = { [weak self] in
             guard let self else {
-                logWarning("onGlobeTap: self is nil")
+                logWarning("activation tap: self is nil")
                 return
             }
-            logInfo("Globe tap received, calling toggleRecording")
+            logInfo("Activation tap received, calling toggleRecording")
             Task { await self.toggleRecording() }
         }
 
-        // Hold: start recording, or stop if already recording from tap
-        globeMonitor.onGlobeHoldStart = { [weak self] in
+        let holdStart: @MainActor () -> Void = { [weak self] in
             guard let self else {
-                logWarning("onGlobeHoldStart: self is nil")
+                logWarning("activation hold start: self is nil")
                 return
             }
-            logInfo("Globe hold start received")
+            logInfo("Activation hold start received")
             // If already recording (from a tap), stop immediately
             if stateManager.isRecording {
                 logInfo("Hold started while recording - stopping immediately")
@@ -202,10 +202,9 @@ final class DictationController: ObservableObject {
             Task { await self.startRecording() }
         }
 
-        // Release after hold: stop recording (only if still recording)
-        globeMonitor.onGlobeHoldEnd = { [weak self] in
+        let holdEnd: @MainActor () -> Void = { [weak self] in
             guard let self else {
-                logWarning("onGlobeHoldEnd: self is nil")
+                logWarning("activation hold end: self is nil")
                 return
             }
             // Only stop if still recording (might have been stopped by hold-start)
@@ -213,16 +212,13 @@ final class DictationController: ObservableObject {
             Task { await self.stopRecordingAndTranscribe() }
         }
 
-        // Alternative hotkey: hold to record
-        hotkeyManager?.onHotkeyDown = { [weak self] in
-            guard let self else { return }
-            Task { await self.startRecording() }
-        }
+        globeMonitor.onGlobeTap = tap
+        globeMonitor.onGlobeHoldStart = holdStart
+        globeMonitor.onGlobeHoldEnd = holdEnd
 
-        hotkeyManager?.onHotkeyUp = { [weak self] in
-            guard let self else { return }
-            Task { await self.stopRecordingAndTranscribe() }
-        }
+        hotkeyManager?.onHotkeyTap = tap
+        hotkeyManager?.onHotkeyHoldStart = holdStart
+        hotkeyManager?.onHotkeyHoldEnd = holdEnd
 
         // Handle retry from error state
         stateManager.onRetry = { [weak self] in

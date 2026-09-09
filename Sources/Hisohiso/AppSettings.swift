@@ -27,7 +27,7 @@ enum SettingsKey: String {
     case wakeWordEnabled
     case wakePhrase
 
-    // UI
+    /// UI
     case showFloatingPill
 
     // Voice verification
@@ -116,8 +116,8 @@ enum AppConstants {
     /// Minimum audio samples for a valid transcription (1 second at 16kHz).
     static let minTranscriptionSamples = 16000
 
-    /// Globe key hold threshold to distinguish tap from hold (seconds).
-    static let globeHoldThreshold: TimeInterval = 0.3
+    /// Activation key (Globe or alternative hotkey) hold threshold to distinguish tap from hold (seconds).
+    static let activationHoldThreshold: TimeInterval = 0.3
 
     /// Recording timeout before showing an error (seconds).
     static let transcriptionTimeout: TimeInterval = 30

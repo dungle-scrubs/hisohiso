@@ -140,7 +140,7 @@ as a fallback. Keys are stored in the macOS Keychain.
 Click the menu bar icon to open Preferences:
 
 - **General** — auto-launch, audio feedback, formatting options
-- **Hotkey** — alternative hotkey (modifier-only supported)
+- **Hotkey** — alternative hotkey: a modifier chord or a single function key (F1-F20), with the same tap and hold behavior as Globe. Useful for external keyboards that cannot send Globe.
 - **Model** — select transcription model, manage downloads
 - **Cloud** — API keys for OpenAI/Groq
 - **Voice** — speaker verification enrollment

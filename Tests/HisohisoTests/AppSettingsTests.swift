@@ -95,8 +95,8 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(AppConstants.targetSampleRate, 16000)
         XCTAssertEqual(AppConstants.minTranscriptionSamples, 16000)
         XCTAssertGreaterThan(AppConstants.transcriptionTimeout, 0)
-        XCTAssertGreaterThan(AppConstants.globeHoldThreshold, 0)
-        XCTAssertLessThan(AppConstants.globeHoldThreshold, 1.0)
+        XCTAssertGreaterThan(AppConstants.activationHoldThreshold, 0)
+        XCTAssertLessThan(AppConstants.activationHoldThreshold, 1.0)
         XCTAssertGreaterThan(AppConstants.waveformBarCount, 0)
         XCTAssertGreaterThan(AppConstants.maxLogAgeDays, 0)
         // Control socket lives in the per-user private temporary directory
